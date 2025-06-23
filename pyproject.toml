@@ -28,8 +28,6 @@ license-files = ["LICEN[CS]E*"]
 
 keywords = ["JSON", "Path"]
 
-[tool.pytest]
-
 [project.optional-dependencies]
 test = [
   "pytest",
@@ -44,4 +42,5 @@ develop = [
 Homepage = "https://github.com/dosarf/aweson"
 Issues = "https://github.com/dosarf/aweson/issues"
 
+[tool.setuptools_scm]
 
