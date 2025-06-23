@@ -135,6 +135,9 @@ class _SubHiearchyAccessor(_Accessor):
         return f"({', '.join(str(sub_accessor) for sub_accessor in self.sub_accessors)})"
 
 
+JP = _Accessor(parent=None, container_type=type(None))
+
+
 def find_all(
         root_data: list | dict | str | int | float | bool,
         path: _Accessor,
