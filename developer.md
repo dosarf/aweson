@@ -15,7 +15,7 @@ With this, you get
 # Running tests
 
 ```
-python -m doctest README.md
+python -m doctest README.rst
 pytest tests
 ```
 
@@ -48,6 +48,7 @@ verify by `git tag`.
 ## Build packages
 
 ```
+rm -rf dist
 python -m build
 ```
 

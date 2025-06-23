@@ -12,7 +12,7 @@ authors = [
   { name="Ferenc Dosa-Racz", email="dosarf@gmail.com" },
 ]
 description = "Traversing and manipulating hierarchical info sets (JSON) using pythonic JSON Path-like expressions"
-readme = "README.md"
+readme = "README.rst"
 
 requires-python = ">=3.10"
 
