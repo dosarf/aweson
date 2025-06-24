@@ -41,6 +41,8 @@ develop = [
 [project.urls]
 Homepage = "https://github.com/dosarf/aweson"
 Issues = "https://github.com/dosarf/aweson/issues"
+Changelog = "https://github.com/dosarf/aweson/blob/master/CHANGELOG.md"
+
 
 [tool.setuptools_scm]
 
