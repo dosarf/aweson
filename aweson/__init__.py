@@ -1,1 +1,1 @@
-from .aweson import JP, find_all
+from .aweson import JP, find_all, find_next

@@ -12,7 +12,7 @@ class _Accessor(ABC):
     parent: _Accessor | None
     container_type: type
 
-    def _access(self, container: list | dict, singular_path: bool = False):
+    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
         """
         Yields one or more tuples of sub-item + a CTOR function to build a JSON Path-like representtion
         to access that sub-item.
@@ -72,9 +72,11 @@ class _DictKeyAccessor(_Accessor):
     key: str
     container_type: type = dict
 
-    def _access(self, container: list | dict, singular_path: bool = False):
+    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
         self._check_container_type(container)
-        if singular_path:
+        if lenient and self.key not in container:
+            yield from iter([])
+        elif yield_path:
             yield container[self.key], (lambda parent: _DictKeyAccessor(parent=parent, key=self.key))
         else:
             yield container[self.key], None
@@ -89,9 +91,11 @@ class _ListIndexAccessor(_Accessor):
     index: int
     container_type: type = list
 
-    def _access(self, container: list | dict, singular_path: bool = False):
+    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
         self._check_container_type(container)
-        if singular_path:
+        if lenient and (self.index >= len(container) or self.index < -len(container)):
+            yield from iter([])
+        elif yield_path:
             if self.index >= 0:
                 yield container[self.index], (lambda parent: _ListIndexAccessor(parent=parent, index=self.index))
             else:
@@ -109,9 +113,10 @@ class _ListSliceAccessor(_Accessor):
     slice_: slice
     container_type: type = list
 
-    def _access(self, container: list | dict, singular_path: bool = False):
+    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
+        _ = lenient  # unused
         self._check_container_type(container)
-        if singular_path:
+        if yield_path:
             def create_accessor_ctor(index: int) -> _Accessor:
                 return (lambda parent: _ListIndexAccessor(parent=parent, index=index))
 
@@ -136,11 +141,13 @@ class _SubHiearchyAccessor(_Accessor):
     """
     sub_accessors: list[_Accessor]
     tuple_ctor: Any
-    container_type: type = list
+    container_type: type = dict
 
-    def _access(self, container: list | dict, singular_path: bool = False):
+    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
+        _ = lenient  # unused
+        self._check_container_type(container)
         items = [next(find_all(container, sub_accessor)) for sub_accessor in self.sub_accessors]
-        if singular_path:
+        if yield_path:
             yield self.tuple_ctor(items), (lambda parent: _SubHiearchyAccessor(parent=parent, sub_accessors=self.sub_accessors, tuple_ctor=self.tuple_ctor))
         else:
             yield self.tuple_ctor(items), None
@@ -155,7 +162,9 @@ JP = _Accessor(parent=None, container_type=type(None))
 def find_all(
         root_data: list | dict | str | int | float | bool,
         path: _Accessor,
-        enumerate: bool = False):
+        *,
+        enumerate: bool = False,
+        lenient: bool = False):
     """
     Finds all matching items in a JSON-like data hierarchy (lists of / dicts of / values) based
     on a JSON Path-like specification.
@@ -192,5 +201,27 @@ def find_all(
             #
             # Inserting into the Nth position (N is current length of stack) achieves the same.
             stack_insert_position = len(stack)
-            for sub_data, accessor_ctor in accessor._access(data, singular_path=enumerate):
+            for sub_data, accessor_ctor in accessor._access(data, yield_path=enumerate, lenient=lenient):
                 stack.insert(stack_insert_position, (sub_data, accessors[1:], accessor_ctor(current_accessor) if accessor_ctor else None ))
+
+
+def find_next(
+        root_data: list | dict | str | int | float | bool,
+        path: _Accessor,
+        *,
+        enumerate: bool = False,
+       **kwargs):
+    """
+    Shorthand for ``next(find_all(...))``. Also takes a keyword argument, ``default``,
+    to delegate it to the ``next(..., default=...)`` call, if defined.
+    """
+    if "default" in kwargs:
+        default = kwargs["default"]
+        try:
+            # we don't want to pass the default value as `next(..., default)` ...
+            return next(find_all(root_data, path, enumerate=enumerate, lenient=True))
+        except StopIteration:
+            # ... because we need to return None for path, if enumerate=True
+            return (None, default) if enumerate else default
+    else:
+        return next(find_all(root_data, path, enumerate=enumerate))

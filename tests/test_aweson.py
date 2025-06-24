@@ -1,6 +1,6 @@
 import pytest
 
-from aweson import JP, find_all
+from aweson import JP, find_all, find_next
 
 
 @pytest.mark.parametrize("jp,stringfied", [
@@ -218,6 +218,17 @@ def test_find_all_index_error(content, jp):
         list(find_all(content, jp))
 
 
+@pytest.mark.parametrize("content, jp",[
+    ([], JP[0]),
+    ([5, 42], JP[2]),
+    ([5, 42], JP[-3]),
+    ({"hello": [5, 42]}, JP.hello[2]),
+    ({"hello": [5, 42]}, JP["hello"][2]),
+])
+def test_lenient_find_all_yields_nothing_on_nonexistent_indexes(content, jp):
+    assert list(find_all(content, jp, lenient=True)) == []
+
+
 @pytest.mark.parametrize("content, jp", [
     ({}, JP.hello),
     ({"hello": {"world": 42}}, JP.hello.hi),
@@ -228,12 +239,87 @@ def test_find_all_key_error(content, jp):
         list(find_all(content, jp))
 
 
+@pytest.mark.parametrize("content, jp", [
+    ({}, JP.hello),
+    ({"hello": {"world": 42}}, JP.hello.hi),
+    ({"hello": {"world": 42}}, JP["hello"]["hi"]),
+])
+def test_lenient_find_all_yields_nothing_on_nonexistent_keys(content, jp):
+    assert list(find_all(content, jp, lenient=True)) == []
 
-def test_ad_hoc():
-    content = {"hello": 42, "hi": "irrelevant"}
-    results = list(find_all(content, JP["hello"]))
-    assert results == [42]
 
-    content = {"hello": {"world": 42}, "hi": "irrelevant"}
-    results = list(find_all(content, JP.hello.world))
-    assert results == [42]
+@pytest.mark.parametrize("content,jp,enumerate,expected_value", [
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[:].hello,
+        False,
+        5,
+    ),
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[1].hello,
+        False,
+        42,
+    ),
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[:].hello,
+        True,
+        (JP[0].hello, 5),
+    ),
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[1].hello,
+        True,
+        (JP[1].hello, 42),
+    ),
+])
+def test_find_next(content, jp, enumerate, expected_value):
+    assert find_next(content, jp, enumerate=enumerate) == expected_value
+
+
+@pytest.mark.parametrize("content,jp,enumerate,default", [
+    # cases: slice with empty list
+    (
+        [],
+        JP[:].hello,
+        False,
+        17
+    ),
+    (
+        [],
+        JP[:].hello,
+        True,
+        (None, 17)
+    ),
+
+    # cases: ignoring index error
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[2].hello,
+        False,
+        5,
+    ),
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[2].hello,
+        True,
+        (None, 5),
+    ),
+
+    # cases: ignoring key error
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[2].hi,
+        False,
+        5,
+    ),
+    (
+        [{"hello": 5}, {"hello": 42}],
+        JP[2].hi,
+        True,
+        (None, 5),
+    ),
+])
+def test_find_next_with_default(content, jp, enumerate, default):
+    assert find_next(content, jp, enumerate=enumerate, default=default)
