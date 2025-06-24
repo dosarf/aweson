@@ -46,13 +46,25 @@ def test_jp_stringification(jp, stringfied):
     (True, JP, [True]),
     ({"hello": 42}, JP, [{"hello": 42}]),
     ([5, 42], JP, [[5, 42]]),
+])
+def test_find_all_for_root_path(content, jp, expected_items):
+    items = list(find_all(content, jp))
+    assert items == expected_items
 
+
+@pytest.mark.parametrize("content,jp,expected_items", [
     ({"hello": 42, "hi": "irrelevant"}, JP.hello, [42]),
     ({"hello": {"world": 42}, "hi": "irrelevant"}, JP.hello.world, [42]),
 
     ({"hello": 42, "hi": "irrelevant"}, JP["hello"], [42]),
     ({"hello": {"world": 42}, "hi": "irrelevant"}, JP["hello"]["world"], [42]),
+])
+def test_find_all_simple_key_based_dict_access(content, jp, expected_items):
+    items = list(find_all(content, jp))
+    assert items == expected_items
 
+
+@pytest.mark.parametrize("content,jp,expected_items", [
     ([5, 42], JP[0], [5]),
     ([5, 42], JP[-1], [42]),
 
@@ -60,15 +72,27 @@ def test_jp_stringification(jp, stringfied):
     ([5, 42, 137], JP[1:], [42, 137]),
     ([5, 42, 137], JP[:1], [5]),
     ([5, 42, 137], JP[::-1], [137, 42, 5]),
+])
+def test_find_all_list_access_by_index_and_slice(content, jp, expected_items):
+    items = list(find_all(content, jp))
+    assert items == expected_items
 
+
+@pytest.mark.parametrize("content,jp,expected_items", [
     ({"hello": [5, 42]}, JP.hello[1], [42]),
     ([{"hello": 42}, {"hello": 5}], JP[1].hello, [5]),
-
     ([{"hello": 42}, {"hello": 5}], JP[1]["hello"], [5]),
+    ({"l1": [{"detail": {"data":5}}, {"detail": {"data": 42}}]}, JP.l1[:].detail.data, [5, 42]),
+])
+def test_find_all_mixed_hierarchy(content, jp, expected_items):
+    items = list(find_all(content, jp))
+    assert items == expected_items
 
+
+@pytest.mark.parametrize("content,jp,expected_items", [
     ([{"hello": "world", "hi": [5, 42, 137]}, {"hello": "mundo", "hi": [-5, -42, -137]}], JP[:](JP.hello, JP.hi[1]), [("world", 42), ("mundo", -42)])
 ])
-def test_find_all(content, jp, expected_items):
+def test_find_all_sub_selection(content, jp, expected_items):
     items = list(find_all(content, jp))
     assert items == expected_items
 
@@ -119,7 +143,6 @@ def test_find_all_enumerating_paths(content,jp,expected_paths_and_items):
         expected_path, expected_item = expected_path_and_item
         assert item == expected_item
         assert path == expected_path
-
 
 
 @pytest.mark.parametrize("content, jp",[
