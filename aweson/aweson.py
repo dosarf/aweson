@@ -101,6 +101,8 @@ class _Accessor(ABC):
         Overloaded for list (index, slice) and various dict key access.
         """
         if isinstance(specification, str):
+            if specification == "*":
+                return _ListSliceAccessor(parent=self, slice_=slice(None, None, None))
             return _DictKeyAccessor(parent=self, key=specification)
         if isinstance(specification, int):
             return _ListIndexAccessor(parent=self, index=specification)
