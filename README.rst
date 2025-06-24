@@ -6,7 +6,7 @@ Traversing and manipulating hierarchical data (JSON) using pythonic JSON Path-li
 Importing
 ---------
 
-    >>> from aweson import JP, find_all
+    >>> from aweson import JP, find_all, find_next
 
 
 Iterating over hierarchical data
@@ -98,3 +98,58 @@ The forms ``JP["field_name"]`` and ``JP.field_name`` are equivalent:
     51
     >>> my_sum(content, "account", "")
     'johndoejanedoejudedeer'
+
+
+Suppressing indexing errors and key errors
+------------------------------------------
+
+By default, path expressions are strict, e.g. for ``list`` indexes:
+
+    >>> list(find_all([0, 1], JP[2]))
+    Traceback (most recent call last):
+      ...
+    IndexError: list index out of range
+
+and for ``dict`` keys:
+
+    >>> list(find_all({"hello": 42}, JP.hi))
+    Traceback (most recent call last):
+      ...
+    KeyError: 'hi'
+
+You can suppress these errors and simply have nothing yielded, for ``list`` indexes:
+
+    >>> list(find_all([0, 1], JP[2], lenient=True))
+    []
+
+and for ``dict`` keys:
+
+    >>> list(find_all({"hello": 42}, JP.hi, lenient=True))
+    []
+
+
+Utility ``find_next()``
+-----------------------
+
+Often, you just need a first value, roughly equivalent to a ``next(find_all(...))``
+invocation. You can use ``find_next()`` for this, for instance
+
+    >>> find_next([{"hello": 5}, {"hello": 42}], JP[:].hello)
+    5
+    >>> find_next([{"hello": 5}, {"hello": 42}], JP[1].hello)
+    42
+
+You can also ask for the path of the value returned, in the style of ``enumerate=True``
+above
+
+    >>> path, value = find_next([{"hello": 5}, {"hello": 42}], JP[-1].hello, enumerate=True)
+    >>> str(path)
+    '[1].hello'
+    >>> value
+    42
+
+You can also supply a default value for ``find_next()``, just like for ``next()``:
+
+    >>> find_next([{"hello": 5}, {"hello": 42}], JP[3].hello, default=17)
+    17
+
