@@ -40,7 +40,7 @@ You may be interested in the actual path of an item being returned, just like
 you get an index alongside items when using ``enumerate()``. For instance, you may want to verify
 ages being non-negative, and report accurately the path of failure items:
 
-    >>> path, item = next(tup for tup in find_all(content, JP.employees[:].age, enumerate=True) if tup[1] < 0)
+    >>> path, item = next(tup for tup in find_all(content, JP.employees[:].age, with_path=True) if tup[1] < 0)
     >>> item
     -23
 
@@ -54,7 +54,7 @@ The enclosing record, using ``.parent`` attribute of the path obtained for the o
     >>> next(find_all(content, path.parent))
     {'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
 
-Note, with argument ``enumerate=True`` passed, ``find_all()`` yields tuples instead of single
+Note, with argument ``with_path=True`` passed, ``find_all()`` yields tuples instead of single
 items.
 
 
@@ -139,10 +139,10 @@ invocation. You can use ``find_next()`` for this, for instance
     >>> find_next([{"hello": 5}, {"hello": 42}], JP[1].hello)
     42
 
-You can also ask for the path of the value returned, in the style of ``enumerate=True``
+You can also ask for the path of the value returned, in the style of ``with_path=True``
 above
 
-    >>> path, value = find_next([{"hello": 5}, {"hello": 42}], JP[-1].hello, enumerate=True)
+    >>> path, value = find_next([{"hello": 5}, {"hello": 42}], JP[-1].hello, with_path=True)
     >>> str(path)
     '[1].hello'
     >>> value

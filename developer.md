@@ -17,6 +17,10 @@ With this, you get
 ```
 python -m doctest README.rst
 pytest tests
+isort aweson
+black aweson
+mypy aweson
+pylint aweson
 ```
 
 # Releasing

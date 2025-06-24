@@ -1,32 +1,80 @@
+"""
+Infra for JSON Path-like expressions and finding items in data hiearchy.
+"""
+
+# pylint: disable=protected-access
 from __future__ import annotations
+
+import dataclasses as dc
 from abc import ABC
 from collections import namedtuple
-import dataclasses as dc
-from typing import Any
+from typing import Any, Callable, Iterator
+
 
 @dc.dataclass(frozen=True, kw_only=True)
 class _Accessor(ABC):
     """
     Base class for building JSON Path-like expression.
     """
+
     parent: _Accessor | None
     container_type: type
 
-    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
+    def _access(
+        self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
+    ) -> Iterator[tuple[Any, Callable[[_Accessor], _Accessor] | None]]:
         """
-        Yields one or more tuples of sub-item + a CTOR function to build a JSON Path-like representtion
-        to access that sub-item.
+        Args:
+            container: the data structure to access into
+            yield_path: whether to yield a singular path to the item (or items) that are being accessed
+            lenient: whether to allow out-of-bounds indexing or missing dict key references to raise
+                IndexError or KeyError, respectively
+        Returns:
+            An iterator to tuples, where there the first field of the tuple is the item being accessed
+            at this point, and the second field of the tuple is either ``None``, or a function taking
+            a single ``parent`` argument, to create paths leading to those items being accessed.
         """
-        pass
+        raise NotImplementedError("Root accessor should not be invoked")
+
+    def _is_singular(self) -> bool:
+        """
+        Returns: if this accessor (excluding any parent from consideration) can only
+            ever return a single item.
+        """
+        return True
+
+    def is_singular(self) -> bool:
+        """
+        Returns: if this path (this accessor and its parents, transitively) can only
+            ever return a single item. E.g. a slice expression in a path makes it non-singular,
+            even if the start/stop combination otherwise would say it's singular, like ``[1:2]``.
+        """
+        return self._is_singular() and (
+            self.parent is None or self.parent.is_singular()
+        )
 
     def _representation(self) -> str:
+        """
+        Represention for this accessor (excluding any parent)
+        """
         return ""
 
     def _check_container_type(self, container: list | dict):
-        if not isinstance(container, self.container_type):
-            raise ValueError(f"Expected {self.container_type}, got {type(container)} at {self}")
+        """
+        Performs a check that a container to access is of the type mandated by
+        the declared container_type of an accessor instance.
+        """
+        if not isinstance(  # pylint: disable=isinstance-second-argument-not-valid-type
+            container, self.container_type
+        ):
+            raise ValueError(
+                f"Expected {self.container_type}, got {type(container)} at {self}"
+            )
 
     def _accessors(self) -> list[_Accessor]:
+        """
+        List of accessors, from root to this, recursively collected.
+        """
         if self.parent is None:
             # Symmetry would suggest here to `return [self]`, however,
             # we cheat here: this instance shall be the root (=first accessor
@@ -39,9 +87,19 @@ class _Accessor(ABC):
         return "".join(a._representation() for a in accessors)
 
     def __getattr__(self, specification):
+        """
+        JSON Path-like expression builder infra.
+
+        Overloaded for dict key access.
+        """
         return _DictKeyAccessor(parent=self, key=specification)
 
     def __getitem__(self, specification):
+        """
+        JSON Path-like expression builder infra.
+
+        Overloaded for list (index, slice) and various dict key access.
+        """
         if isinstance(specification, str):
             return _DictKeyAccessor(parent=self, key=specification)
         if isinstance(specification, int):
@@ -51,35 +109,60 @@ class _Accessor(ABC):
         raise ValueError(f"Unsupported indexing expression {specification}")
 
     def __call__(self, *paths, **named_paths):
+        """
+        JSON Path-like expression builder infra.
+
+        Overloaded for sub-item selection (vanilla or named tuple).
+        """
         if len(paths) > 0 and len(named_paths) > 0:
-            raise NotImplementedError("Either all sub-selections are to be named, or none of them.")
-        elif len(paths) > 0:
-            if any(not isinstance(path, _Accessor) for path in paths):  # TODO consider checking is_singular
-                raise ValueError("Need path notation to dig out tuples from sub-hierarchies")
-            return _SubHiearchyAccessor(parent=self, sub_accessors=paths, tuple_ctor=lambda values: tuple(values))
-        elif len(named_paths) > 0:
+            raise NotImplementedError(
+                "Either all sub-selections are to be named, or none of them."
+            )
+
+        def verify_paths(paths):
+            not_accessors = [path for path in paths if not isinstance(path, _Accessor)]
+            if len(not_accessors) > 0:
+                raise ValueError(f"Not paths: {not_accessors}")
+            not_singulars = [path for path in paths if not path.is_singular()]
+            if len(not_singulars) > 0:
+                raise ValueError(
+                    f"Not singular paths (could point to multiple items): {not_singulars}"
+                )
+
+        if len(paths) > 0:
+            verify_paths(paths)
+            return _SubHiearchyAccessor(
+                parent=self, sub_accessors=paths, tuple_ctor=tuple
+            )
+        if len(named_paths) > 0:
             paths = list(named_paths.values())
-            if any(not isinstance(path, _Accessor) for path in paths):  # TODO consider checking is_singular
-                raise ValueError("Need path notation to dig out tuples from sub-hierarchies")
-            named_tuple = namedtuple('SubSelect', list(named_paths.keys()))
-            return _SubHiearchyAccessor(parent=self, sub_accessors=paths, tuple_ctor=lambda values: named_tuple(*values))
+            verify_paths(paths)
+            named_tuple = namedtuple("SubSelect", list(named_paths.keys()))
+            return _SubHiearchyAccessor(
+                parent=self,
+                sub_accessors=paths,
+                tuple_ctor=lambda values: named_tuple(*values),
+            )
         raise NotImplementedError("Sub-selection cannot be empty")
 
 
 @dc.dataclass(frozen=True, kw_only=True)
 class _DictKeyAccessor(_Accessor):
     """Accesses a value of a dict container by a key"""
+
     key: str
     container_type: type = dict
 
-    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
+    def _access(
+        self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
+    ) -> Iterator[tuple[Any, Callable[[_Accessor], _Accessor] | None]]:
         self._check_container_type(container)
         if lenient and self.key not in container:
             yield from iter([])
         elif yield_path:
-            yield container[self.key], (lambda parent: _DictKeyAccessor(parent=parent, key=self.key))
+            yield container[self.key], (lambda parent: _DictKeyAccessor(parent=parent, key=self.key))  # type: ignore
         else:
-            yield container[self.key], None
+            yield container[self.key], None  # type: ignore
 
     def _representation(self) -> str:
         return f".{self.key}"
@@ -88,18 +171,25 @@ class _DictKeyAccessor(_Accessor):
 @dc.dataclass(frozen=True, kw_only=True)
 class _ListIndexAccessor(_Accessor):
     """Accesses an item of a list by an index"""
+
     index: int
     container_type: type = list
 
-    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
+    def _access(
+        self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
+    ) -> Iterator[tuple[Any, Callable[[_Accessor], _Accessor] | None]]:
         self._check_container_type(container)
         if lenient and (self.index >= len(container) or self.index < -len(container)):
             yield from iter([])
         elif yield_path:
             if self.index >= 0:
-                yield container[self.index], (lambda parent: _ListIndexAccessor(parent=parent, index=self.index))
+                yield container[self.index], lambda parent: _ListIndexAccessor(
+                    parent=parent, index=self.index
+                )
             else:
-                yield container[self.index], (lambda parent: _ListIndexAccessor(parent=parent, index=len(container) + self.index))
+                yield container[self.index], lambda parent: _ListIndexAccessor(
+                    parent=parent, index=len(container) + self.index
+                )
         else:
             yield container[self.index], None
 
@@ -110,28 +200,45 @@ class _ListIndexAccessor(_Accessor):
 @dc.dataclass(frozen=True, kw_only=True)
 class _ListSliceAccessor(_Accessor):
     """Accesses items of a list by a slice"""
+
     slice_: slice
     container_type: type = list
 
-    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
+    def _is_singular(self) -> bool:
+        """
+        Returns: if this access can only ever return a single item.
+        """
+        return False
+
+    def _access(
+        self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
+    ) -> Iterator[tuple[Any, Callable[[_Accessor], _Accessor] | None]]:
         _ = lenient  # unused
         self._check_container_type(container)
         if yield_path:
+
             def create_accessor_ctor(index: int) -> _Accessor:
-                return (lambda parent: _ListIndexAccessor(parent=parent, index=index))
+                return lambda parent: _ListIndexAccessor(parent=parent, index=index)  # type: ignore
 
             slice_indices = self.slice_.indices(len(container))
 
-            for current_index, item in zip(range(slice_indices[0], slice_indices[1], slice_indices[2]), container[self.slice_]):
-                yield item, create_accessor_ctor(current_index)
+            yield from (
+                (item, create_accessor_ctor(current_index))
+                for current_index, item in zip(
+                    range(slice_indices[0], slice_indices[1], slice_indices[2]),
+                    container[self.slice_],
+                )
+            )
         else:
             yield from ((item, None) for item in container[self.slice_])
 
     def _representation(self) -> str:
-        repr = (f"[{self.slice_.start}" if self.slice_.start is not None else "[") \
-            + (f":{self.slice_.stop}" if self.slice_.stop is not None else ":") \
+        repr_ = (
+            (f"[{self.slice_.start}" if self.slice_.start is not None else "[")
+            + (f":{self.slice_.stop}" if self.slice_.stop is not None else ":")
             + (f":{self.slice_.step}]" if self.slice_.step is not None else "]")
-        return repr
+        )
+        return repr_
 
 
 @dc.dataclass(frozen=True, kw_only=True)
@@ -139,52 +246,62 @@ class _SubHiearchyAccessor(_Accessor):
     """
     Instead of returning an entire item (of a list), it constructs a tuple based on sub-JSON Path-like expressions.
     """
+
     sub_accessors: list[_Accessor]
     tuple_ctor: Any
     container_type: type = dict
 
-    def _access(self, container: list | dict, *, yield_path: bool = False, lenient: bool = False):
+    def _access(
+        self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
+    ) -> Iterator[tuple[Any, Callable[[_Accessor], _Accessor] | None]]:
         _ = lenient  # unused
         self._check_container_type(container)
-        items = [next(find_all(container, sub_accessor)) for sub_accessor in self.sub_accessors]
+        items = [
+            find_next(container, sub_accessor, default=None)
+            for sub_accessor in self.sub_accessors
+        ]
         if yield_path:
-            yield self.tuple_ctor(items), (lambda parent: _SubHiearchyAccessor(parent=parent, sub_accessors=self.sub_accessors, tuple_ctor=self.tuple_ctor))
+            yield self.tuple_ctor(items), lambda parent: _SubHiearchyAccessor(
+                parent=parent,
+                sub_accessors=self.sub_accessors,
+                tuple_ctor=self.tuple_ctor,
+            )
         else:
             yield self.tuple_ctor(items), None
 
     def _representation(self):
-        return f"({', '.join(str(sub_accessor) for sub_accessor in self.sub_accessors)})"
+        return (
+            f"({', '.join(str(sub_accessor) for sub_accessor in self.sub_accessors)})"
+        )
 
 
 JP = _Accessor(parent=None, container_type=type(None))
 
 
 def find_all(
-        root_data: list | dict | str | int | float | bool,
-        path: _Accessor,
-        *,
-        enumerate: bool = False,
-        lenient: bool = False):
+    root_data: list | dict | str | int | float | bool,
+    path: _Accessor,
+    *,
+    with_path: bool = False,
+    lenient: bool = False,
+):
     """
     Finds all matching items in a JSON-like data hierarchy (lists of / dicts of / values) based
-    on a JSON Path-like specification.
+    on a JSON Path-like specification. Technically, it iterates over the matching items.
 
-    Technically, it iterates over the matching items.
-
-    If `enumerate` is False (default), then it will yield the matching items only.
-
-    If `enumerate` is True, then it will yield a tuple of JSON Path-like pointer to a matching item +
-    the matching item itself. Just like `enumerate(your_list)` yields index + item tuples, where the
-    index points to the item in `your_list`, similarly, `find_all(..., ..., enumerate=True)` yields
-    a path + item tuples, where path points at the item itself.
+    Args:
+        path: JSON Path-like expression, specifying what item (or items) to match & iterate over
+        with_path: whether to yield accurate, JSON Path-like pointer objects to items found
+        lenient: whether to allow out of bound indices or missing keys, or raise ``IndexError`` and
+            ``KeyError`` exceptions, respectivately.
     """
     all_accessors = list(path._accessors())
-    stack = [(root_data, all_accessors, JP)]
+    stack = [(root_data, all_accessors, JP if with_path else None)]
 
     while len(stack) > 0:
         data, accessors, current_accessor = stack.pop()
         if len(accessors) == 0:  # leaf item
-            if enumerate:
+            if with_path:
                 yield current_accessor, data
             else:
                 yield data
@@ -201,16 +318,21 @@ def find_all(
             #
             # Inserting into the Nth position (N is current length of stack) achieves the same.
             stack_insert_position = len(stack)
-            for sub_data, accessor_ctor in accessor._access(data, yield_path=enumerate, lenient=lenient):
-                stack.insert(stack_insert_position, (sub_data, accessors[1:], accessor_ctor(current_accessor) if accessor_ctor else None ))
+            sub_tuples = accessor._access(data, yield_path=with_path, lenient=lenient)  # type: ignore
+            for sub_data, accessor_ctor in sub_tuples:
+                new_accessor = accessor_ctor(current_accessor) if accessor_ctor is not None else None  # type: ignore
+                stack.insert(
+                    stack_insert_position, (sub_data, accessors[1:], new_accessor)
+                )
 
 
 def find_next(
-        root_data: list | dict | str | int | float | bool,
-        path: _Accessor,
-        *,
-        enumerate: bool = False,
-       **kwargs):
+    root_data: list | dict | str | int | float | bool,
+    path: _Accessor,
+    *,
+    with_path: bool = False,
+    **kwargs,
+):
     """
     Shorthand for ``next(find_all(...))``. Also takes a keyword argument, ``default``,
     to delegate it to the ``next(..., default=...)`` call, if defined.
@@ -219,9 +341,9 @@ def find_next(
         default = kwargs["default"]
         try:
             # we don't want to pass the default value as `next(..., default)` ...
-            return next(find_all(root_data, path, enumerate=enumerate, lenient=True))
+            return next(find_all(root_data, path, with_path=with_path, lenient=True))
         except StopIteration:
-            # ... because we need to return None for path, if enumerate=True
-            return (None, default) if enumerate else default
+            # ... because we need to return None for path, if with_path=True
+            return (None, default) if with_path else default
     else:
-        return next(find_all(root_data, path, enumerate=enumerate))
+        return next(find_all(root_data, path, with_path=with_path))
