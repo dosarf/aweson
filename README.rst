@@ -47,7 +47,7 @@ ages being non-negative, and report accurately the path of failure items:
 The offending path, then, in human-readable format:
 
     >>> str(path)
-    '.employees[1].age'
+    '$.employees[1].age'
 
 The enclosing record, using ``.parent`` attribute of the path obtained for the offending age:
 
@@ -175,7 +175,7 @@ above
 
     >>> path, value = find_next([{"hello": 5}, {"hello": 42}], JP[-1].hello, with_path=True)
     >>> str(path)
-    '[1].hello'
+    '$[1].hello'
     >>> value
     42
 

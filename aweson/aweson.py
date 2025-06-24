@@ -58,7 +58,7 @@ class _Accessor(ABC):
         """
         Represention for this accessor (excluding any parent)
         """
-        return ""
+        raise NotImplementedError("Root accessor should not be invoked")
 
     def _check_container_type(self, container: list | dict):
         """
@@ -85,7 +85,7 @@ class _Accessor(ABC):
 
     def __str__(self):
         accessors = self._accessors()
-        return "".join(a._representation() for a in accessors)
+        return "$" + "".join(a._representation() for a in accessors)
 
     def __getattr__(self, specification):
         """
