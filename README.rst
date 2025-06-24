@@ -100,6 +100,37 @@ The forms ``JP["field_name"]`` and ``JP.field_name`` are equivalent:
     'johndoejanedoejudedeer'
 
 
+Field name by regular expressions
+---------------------------------
+
+Sometimes you have a JSON format where types are represented by JSON objects, e.g.
+
+    >>> content = {
+    ...     "apple": [{"name": "red delicious"}, {"name": "punakaneli"}],
+    ...     "pear": [{"name": "wilhelm"}, {"name": "conference"}]
+    ... }
+
+i.e. it's not a union list of records with a type discriminator ``[{"type": "apple", "name": ...}, ...]``.
+Iterating over all the fruits, regardless of their type, in our example ``content`` above can
+be achieved by:
+
+    >>> list(find_all(content, JP["apple|pear"][:].name))
+    ['red delicious', 'punakaneli', 'wilhelm', 'conference']
+
+if you are only interested in apples and pears, or
+
+    >>> list(find_all(content, JP[".*"][:].name))
+    ['red delicious', 'punakaneli', 'wilhelm', 'conference']
+
+if you are interested in fruits other than apples and pears.
+
+Note, that the expression ``JP["*"]`` is also supported, but that's `not` a regular expression,
+merely a conventional JSON Path notation, and equivalent to ``JP[:]``:
+
+    >>> list(find_all([5, 42, 137], JP["*"]))
+    [5, 42, 137]
+
+
 Suppressing indexing errors and key errors
 ------------------------------------------
 

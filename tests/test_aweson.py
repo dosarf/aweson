@@ -26,6 +26,7 @@ from aweson import JP, find_all, find_next
         (JP[1:12:-1], "[1:12:-1]"),
         (JP[5].hello, "[5].hello"),
         (JP.hello[5], ".hello[5]"),
+        (JP["hello|hi"].id, "[hello|hi].id"),
         (JP[5].hello[42].world, "[5].hello[42].world"),
         (JP.hello[5].world[42], ".hello[5].world[42]"),
         (JP["hello"][5]["world"][42], ".hello[5].world[42]"),
@@ -99,6 +100,55 @@ def test_find_all_simple_key_based_dict_access(content, jp, expected_items):
 )
 def test_find_all_list_access_by_index_and_slice(content, jp, expected_items):
     items = list(find_all(content, jp))
+    assert items == expected_items
+
+
+@pytest.mark.parametrize(
+    "content,jp,expected_items",
+    [
+        (
+            {
+                "apple": [{"name": "red delicious"}, {"name": "punakaneli"}],
+                "pear": [{"name": "wilhelm"}, {"name": "conference"}],
+            },
+            JP[".*"][:].name,
+            ["red delicious", "punakaneli", "wilhelm", "conference"],
+        ),
+        (
+            {
+                "apple": [{"name": "red delicious"}, {"name": "punakaneli"}],
+                "pear": [{"name": "wilhelm"}, {"name": "conference"}],
+            },
+            JP["apple|pear"][:].name,
+            ["red delicious", "punakaneli", "wilhelm", "conference"],
+        ),
+    ],
+)
+def test_find_all_access_by_key_regex(content, jp, expected_items):
+    items = list(find_all(content, jp))
+    assert items == expected_items
+
+
+@pytest.mark.parametrize(
+    "content,jp,expected_items",
+    [
+        (
+            {
+                "apple": [{"name": "red delicious"}, {"name": "punakaneli"}],
+                "pear": [{"name": "wilhelm"}, {"name": "conference"}],
+            },
+            JP[".*"][:].name,
+            [
+                (JP.apple[0].name, "red delicious"),
+                (JP.apple[1].name, "punakaneli"),
+                (JP.pear[0].name, "wilhelm"),
+                (JP.pear[1].name, "conference"),
+            ],
+        ),
+    ],
+)
+def test_find_all_access_by_key_regex_with_path(content, jp, expected_items):
+    items = list(find_all(content, jp, with_path=True))
     assert items == expected_items
 
 
@@ -281,7 +331,7 @@ def test_sub_selection_must_be_singular():
         ),
     ],
 )
-def test_find_all_enumerating_paths(content, jp, expected_paths_and_items):
+def test_find_all_with_paths(content, jp, expected_paths_and_items):
     paths_and_items = list(find_all(content, jp, with_path=True))
     assert len(paths_and_items) == len(expected_paths_and_items)
     for path_and_item, expected_path_and_item in zip(
