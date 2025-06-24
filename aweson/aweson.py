@@ -1,6 +1,8 @@
 from __future__ import annotations
 from abc import ABC
+from collections import namedtuple
 import dataclasses as dc
+from typing import Any
 
 @dc.dataclass(frozen=True, kw_only=True)
 class _Accessor(ABC):
@@ -48,10 +50,21 @@ class _Accessor(ABC):
             return _ListSliceAccessor(parent=self, slice_=specification)
         raise ValueError(f"Unsupported indexing expression {specification}")
 
-    def __call__(self, *paths):
-        if any(not isinstance(path, _Accessor) for path in paths):
-            raise ValueError("Need path notation to dig out tuples from sub-hierarchies")
-        return _SubHiearchyAccessor(parent=self, sub_accessors=paths)
+    def __call__(self, *paths, **named_paths):
+        if len(paths) > 0 and len(named_paths) > 0:
+            raise NotImplementedError("Either all sub-selections are to be named, or none of them.")
+        elif len(paths) > 0:
+            if any(not isinstance(path, _Accessor) for path in paths):  # TODO consider checking is_singular
+                raise ValueError("Need path notation to dig out tuples from sub-hierarchies")
+            return _SubHiearchyAccessor(parent=self, sub_accessors=paths, tuple_ctor=lambda values: tuple(values))
+        elif len(named_paths) > 0:
+            paths = list(named_paths.values())
+            if any(not isinstance(path, _Accessor) for path in paths):  # TODO consider checking is_singular
+                raise ValueError("Need path notation to dig out tuples from sub-hierarchies")
+            named_tuple = namedtuple('SubSelect', list(named_paths.keys()))
+            return _SubHiearchyAccessor(parent=self, sub_accessors=paths, tuple_ctor=lambda values: named_tuple(*values))
+        raise NotImplementedError("Sub-selection cannot be empty")
+
 
 @dc.dataclass(frozen=True, kw_only=True)
 class _DictKeyAccessor(_Accessor):
@@ -122,14 +135,15 @@ class _SubHiearchyAccessor(_Accessor):
     Instead of returning an entire item (of a list), it constructs a tuple based on sub-JSON Path-like expressions.
     """
     sub_accessors: list[_Accessor]
+    tuple_ctor: Any
     container_type: type = list
 
     def _access(self, container: list | dict, singular_path: bool = False):
         items = [next(find_all(container, sub_accessor)) for sub_accessor in self.sub_accessors]
         if singular_path:
-            yield tuple(items), (lambda parent: _SubHiearchyAccessor(parent=parent, sub_accessors=self.sub_accessors))
+            yield self.tuple_ctor(items), (lambda parent: _SubHiearchyAccessor(parent=parent, sub_accessors=self.sub_accessors, tuple_ctor=self.tuple_ctor))
         else:
-            yield tuple(items), None
+            yield self.tuple_ctor(items), None
 
     def _representation(self):
         return f"({', '.join(str(sub_accessor) for sub_accessor in self.sub_accessors)})"
