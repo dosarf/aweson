@@ -6,6 +6,7 @@ Infra for JSON Path-like expressions and finding items in data hiearchy.
 from __future__ import annotations
 
 import dataclasses as dc
+import re
 from abc import ABC
 from collections import namedtuple
 from typing import Any, Callable, Iterator
@@ -103,7 +104,10 @@ class _Accessor(ABC):
         if isinstance(specification, str):
             if specification == "*":
                 return _ListSliceAccessor(parent=self, slice_=slice(None, None, None))
-            return _DictKeyAccessor(parent=self, key=specification)
+            if specification.isidentifier():
+                return _DictKeyAccessor(parent=self, key=specification)
+            key_regex = re.compile(specification)
+            return _DictKeyRegexAccessor(parent=self, key_regex=key_regex)
         if isinstance(specification, int):
             return _ListIndexAccessor(parent=self, index=specification)
         if isinstance(specification, slice):
@@ -171,6 +175,33 @@ class _DictKeyAccessor(_Accessor):
 
 
 @dc.dataclass(frozen=True, kw_only=True)
+class _DictKeyRegexAccessor(_Accessor):
+    """Accesses a value or values of a dict container by a regex matching keys"""
+
+    key_regex: re.Pattern
+    container_type: type = dict
+
+    def _is_singular(self) -> bool:
+        return False
+
+    def _access(
+        self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
+    ) -> Iterator[tuple[Any, Callable[[_Accessor], _Accessor] | None]]:
+        self._check_container_type(container)
+        for key, value in container.items():  # type: ignore
+            if self.key_regex.findall(key):  # pylint: disable=no-member
+                if yield_path:
+                    yield value, lambda parent: _DictKeyAccessor(
+                        parent=parent, key=key  # pylint: disable=cell-var-from-loop
+                    )
+                else:
+                    yield value, None
+
+    def _representation(self) -> str:
+        return f"[{self.key_regex.pattern}]"  # pylint: disable=no-member
+
+
+@dc.dataclass(frozen=True, kw_only=True)
 class _ListIndexAccessor(_Accessor):
     """Accesses an item of a list by an index"""
 
@@ -207,9 +238,6 @@ class _ListSliceAccessor(_Accessor):
     container_type: type = list
 
     def _is_singular(self) -> bool:
-        """
-        Returns: if this access can only ever return a single item.
-        """
         return False
 
     def _access(
