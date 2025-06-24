@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2.0.0 (2025-06-24)
+
+- Support lenient iteration
+  - no KeyError, IndexError raised in lenient mode
+- Argument `enumerate` renamed to `with_path`, and a keyword-only argument now
+- Support `["*"]` resembling JSON Path `[*]` syntax
+- Support `dict` key matching by regexp
+- Make string representation of paths resemble more RFC 9535
+
 ## 1.1.0 (2025-06-24)
 
 - Support named tuples in sub-select expressions
