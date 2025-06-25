@@ -6,7 +6,7 @@ Traversing and manipulating hierarchical data (JSON) using pythonic JSON Path-li
 Importing
 ---------
 
->>> from aweson import JP, find_all, find_next
+>>> from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next
 
 
 Iterating over hierarchical data
@@ -183,3 +183,28 @@ You can also supply a default value for ``find_next()``, just like for ``next()`
 
 >>> find_next([{"hello": 5}, {"hello": 42}], JP[3].hello, default=17)
 17
+
+
+Utilities: finding unique and duplicate items
+---------------------------------------------
+
+A common task is to find only unique items in data, e.g.
+
+>>> content = [{"hi": 1}, {"hi": 2}, {"hi": 1}, {"hi": 3}, {"hi": -22}, {"hi": 3}]
+>>> list(find_all_unique(content, JP[:].hi))
+[1, 2, 3, -22]
+
+and of course you can ask for the paths, too
+
+>>> content = [{"hi": 1}, {"hi": 2}, {"hi": 1}, {"hi": 3}, {"hi": -22}, {"hi": 3}]
+>>> [(str(path), item) for path, item in find_all_unique(content, JP[:].hi, with_path=True)]
+[('$[0].hi', 1), ('$[1].hi', 2), ('$[3].hi', 3), ('$[4].hi', -22)]
+
+A related common task is to find duplicates, e.g.
+
+>>> content = {
+...     "apple": [{"name": "red delicious", "id": 123}, {"name": "punakaneli", "id": 234}],
+...     "pear": [{"name": "wilhelm", "id": 345}, {"name": "conference", "id": 123}]
+... }
+>>> [f"Duplicate ID: {item} at {path.parent}" for path, item in find_all_duplicate(content, JP["apple|pear"][:].id, with_path=True)]
+['Duplicate ID: 123 at $.pear[1]']

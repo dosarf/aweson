@@ -377,3 +377,64 @@ def find_next(
             return (None, default) if with_path else default
     else:
         return next(find_all(root_data, path, with_path=with_path))
+
+
+def _find_all_with_multiplicity(
+    root_data: list | dict | str | int | float | bool,
+    path: _Accessor,
+    *,
+    with_path: bool = False,
+    lenient: bool = False,
+):
+    """
+    Workhorse utility function for finding both unique and duplicate items.
+    """
+    item_func = (lambda i: i[1]) if with_path else (lambda i: i)
+
+    known_items: dict = {}
+
+    for tup in find_all(root_data, path, with_path=with_path, lenient=lenient):
+        item = item_func(tup)
+        if item in known_items:
+            known_items[item] += 1
+        else:
+            known_items[item] = 0
+        yield tup, known_items[item]
+
+
+def find_all_unique(
+    root_data: list | dict | str | int | float | bool,
+    path: _Accessor,
+    *,
+    with_path: bool = False,
+    lenient: bool = False,
+):
+    """
+    Yields unique elemnents, with or without paths.
+    """
+    yield from (
+        item
+        for item, multiplicity in _find_all_with_multiplicity(
+            root_data, path, with_path=with_path, lenient=lenient
+        )
+        if multiplicity == 0
+    )
+
+
+def find_all_duplicate(
+    root_data: list | dict | str | int | float | bool,
+    path: _Accessor,
+    *,
+    with_path: bool = False,
+    lenient: bool = False,
+):
+    """
+    Yields duplicate elemnents, with or without paths.
+    """
+    yield from (
+        item
+        for item, multiplicity in _find_all_with_multiplicity(
+            root_data, path, with_path=with_path, lenient=lenient
+        )
+        if multiplicity > 0
+    )

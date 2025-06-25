@@ -1,6 +1,6 @@
 import pytest
 
-from aweson import JP, find_all, find_next
+from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next
 
 
 @pytest.mark.parametrize(
@@ -471,3 +471,136 @@ def test_find_next(content, jp, with_path, expected_value):
 )
 def test_find_next_with_default(content, jp, with_path, default):
     assert find_next(content, jp, with_path=with_path, default=default)
+
+
+@pytest.mark.parametrize(
+    "content,jp,with_path,expected_items",
+    [
+        ([1, 2, 1, 3, -22, 3], JP[:], False, [1, 2, 3, -22]),
+        (
+            [1, 2, 1, 3, -22, 3],
+            JP[:],
+            True,
+            [(JP[0], 1), (JP[1], 2), (JP[3], 3), (JP[4], -22)],
+        ),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:].hello,
+            False,
+            [1, 2, 3, -22],
+        ),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:].hello,
+            True,
+            [(JP[0].hello, 1), (JP[1].hello, 2), (JP[3].hello, 3), (JP[4].hello, -22)],
+        ),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:4].hello,
+            False,
+            [1, 2, 3],
+        ),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:4].hello,
+            True,
+            [(JP[0].hello, 1), (JP[1].hello, 2), (JP[3].hello, 3)],
+        ),
+    ],
+)
+def test_find_all_unique(content, jp, with_path, expected_items):
+    items = list(find_all_unique(content, jp, with_path=with_path))
+    assert items == expected_items
+
+
+@pytest.mark.parametrize(
+    "content,jp,with_path,expected_items",
+    [
+        ([1, 2, 1, 3, -22, 3], JP[:], False, [1, 3]),
+        ([1, 2, 1, 3, -22, 3], JP[:], True, [(JP[2], 1), (JP[5], 3)]),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:].hello,
+            False,
+            [1, 3],
+        ),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:].hello,
+            True,
+            [(JP[2].hello, 1), (JP[5].hello, 3)],
+        ),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:3].hello,
+            False,
+            [1],
+        ),
+        (
+            [
+                {"hello": 1},
+                {"hello": 2},
+                {"hello": 1},
+                {"hello": 3},
+                {"hello": -22},
+                {"hello": 3},
+            ],
+            JP[:3].hello,
+            True,
+            [(JP[2].hello, 1)],
+        ),
+    ],
+)
+def test_find_all_duplicates(content, jp, with_path, expected_items):
+    items = list(find_all_duplicate(content, jp, with_path=with_path))
+    assert items == expected_items
