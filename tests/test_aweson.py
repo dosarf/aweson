@@ -1,6 +1,46 @@
 import pytest
 
 from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next
+from aweson.aweson import _Predicate
+
+
+@pytest.mark.parametrize(
+    "jp_bool",
+    [
+        JP == 0,
+        JP != 0,
+        JP < 0,
+        JP <= 0,
+        JP > 0,
+        JP >= 0,
+        JP.price == 0,
+        JP.price != 0,
+        JP.price < 0,
+        JP.price <= 0,
+        JP.price > 0,
+        JP.price >= 0,
+        JP.price[0] == 0,
+        JP.price[0] != 0,
+        JP.price[0] < 0,
+        JP.price[0] <= 0,
+        JP.price[0] > 0,
+        JP.price[0] >= 0,
+        JP.price == 0,
+        JP.price != 0,
+        JP.price < 0,
+        JP.price <= 0,
+        JP.price > 0,
+        JP.price >= 0,
+        JP.price.unit == 0,
+        JP.price.unit != 0,
+        JP.price.unit < 0,
+        JP.price.unit <= 0,
+        JP.price.unit > 0,
+        JP.price.unit >= 0,
+    ],
+)
+def test_overloaded_bool_operators(jp_bool):
+    assert isinstance(jp_bool, _Predicate)
 
 
 @pytest.mark.parametrize(
@@ -17,6 +57,18 @@ from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next
         (JP[5][42], "$[5][42]"),
         (JP[:], "$[:]"),
         (JP["*"], "$[:]"),
+        (JP[JP == 0], "$[?@ == 0]"),
+        (JP[JP != 0], "$[?@ != 0]"),
+        (JP[JP > 0], "$[?@ > 0]"),
+        (JP[JP >= 0], "$[?@ >= 0]"),
+        (JP[JP < 0], "$[?@ < 0]"),
+        (JP[JP <= 0], "$[?@ <= 0]"),
+        (JP[JP.id], "$[?@.id]"),
+        (JP[JP.id == 0], "$[?@.id == 0]"),
+        (JP.products[JP == 0], "$.products[?@ == 0]"),
+        (JP.products[JP.id], "$.products[?@.id]"),
+        (JP.products[JP.price > 120], "$.products[?@.price > 120]"),
+        (JP.products[JP.price > JP.avg_price], "$.products[?@.price > @.avg_price]"),
         (JP[::], "$[:]"),
         (JP[1:], "$[1:]"),
         (JP[1::], "$[1:]"),
@@ -30,7 +82,7 @@ from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next
         (JP[5].hello[42].world, "$[5].hello[42].world"),
         (JP.hello[5].world[42], "$.hello[5].world[42]"),
         (JP["hello"][5]["world"][42], "$.hello[5].world[42]"),
-        (JP.hello(JP.world, JP.hi[0]), "$.hello($.world, $.hi[0])"),
+        (JP.hello(JP.world, JP.hi[0]), "$.hello(@.world, @.hi[0])"),
     ],
 )
 def test_jp_stringification(jp, stringfied):
@@ -603,4 +655,112 @@ def test_find_all_unique(content, jp, with_path, expected_items):
 )
 def test_find_all_duplicates(content, jp, with_path, expected_items):
     items = list(find_all_duplicate(content, jp, with_path=with_path))
+    assert items == expected_items
+
+
+@pytest.mark.parametrize(
+    "content,jp,with_path,expected_items",
+    [
+        # cases: if attribute / path exists
+        ([{"hello": 5, "id": 1}, {"hi": 42, "id": 2}], JP[JP.hi].id, False, [2]),
+        (
+            [{"hello": 5, "id": 1}, {"hi": 42, "id": 2}],
+            JP[JP.hi].id,
+            True,
+            [(JP[1].id, 2)],
+        ),
+        # cases: comparing to constant literal
+        (
+            {
+                "product": [
+                    {"current_price": 12.3, "avg_price": 10.5, "name": "kerfufle"},
+                    {"current_price": 1.3, "avg_price": 9.5, "name": "acme"},
+                ]
+            },
+            JP.product[JP.current_price < 10.1].name,
+            False,
+            ["acme"],
+        ),
+        (
+            {
+                "product": [
+                    {"current_price": 12.3, "avg_price": 10.5, "name": "kerfufle"},
+                    {"current_price": 1.3, "avg_price": 9.5, "name": "acme"},
+                ]
+            },
+            JP.product[JP.current_price < 10.1].name,
+            True,
+            [(JP.product[1].name, "acme")],
+        ),
+        # cases: comparing two sub-items
+        (
+            {
+                "product": [
+                    {"current_price": 12.3, "avg_price": 10.5, "name": "kerfufle"},
+                    {"current_price": 1.3, "avg_price": 9.5, "name": "acme"},
+                ]
+            },
+            JP.product[JP.current_price > JP.avg_price].name,
+            False,
+            ["kerfufle"],
+        ),
+        (
+            {
+                "product": [
+                    {"current_price": 12.3, "avg_price": 10.5, "name": "kerfufle"},
+                    {"current_price": 1.3, "avg_price": 9.5, "name": "acme"},
+                ]
+            },
+            JP.product[JP.current_price > JP.avg_price].name,
+            True,
+            [(JP.product[0].name, "kerfufle")],
+        ),
+    ],
+)
+def test_find_all_with_attribute_expressions(content, jp, with_path, expected_items):
+    items = list(find_all(content, jp, with_path=with_path))
+    assert items == expected_items
+
+
+@pytest.mark.parametrize(
+    "content,jp,with_path,expected_items",
+    [
+        ([0, 5, -5, 42], JP[JP == 0], True, [(JP[0], 0)]),
+        ({"hello": [0, 5, -5, 42]}, JP.hello[JP == 0], True, [(JP.hello[0], 0)]),
+        (
+            [{"hi": 0}, {"hi": 5}, {"hi": -5}, {"hi": 42}],
+            JP[JP.hi == 0],
+            True,
+            [(JP[0], {"hi": 0})],
+        ),
+        (
+            {"hello": [{"hi": 0}, {"hi": 5}, {"hi": -5}, {"hi": 42}]},
+            JP.hello[JP.hi == 0],
+            True,
+            [(JP.hello[0], {"hi": 0})],
+        ),
+        ([0, 5, -5, 42], JP[JP != 0], True, [(JP[1], 5), (JP[2], -5), (JP[3], 42)]),
+        ([0, 5, -5, 42], JP[JP > 0], True, [(JP[1], 5), (JP[3], 42)]),
+        ([0, 5, -5, 42], JP[JP >= 0], True, [(JP[0], 0), (JP[1], 5), (JP[3], 42)]),
+        ([0, 5, -5, 42], JP[JP < 0], True, [(JP[2], -5)]),
+        ([0, 5, -5, 42], JP[JP <= 0], True, [(JP[0], 0), (JP[2], -5)]),
+    ],
+)
+def test_find_all_with_attribute_expressions_all_operators(
+    content, jp, with_path, expected_items
+):
+    items = list(find_all(content, jp, with_path=with_path))
+    assert items == expected_items
+
+
+@pytest.mark.parametrize(
+    "content,jp,expected_items",
+    [
+        ([{"id2": 0}], JP[JP.id == 0], []),
+        ([{"id": None}], JP[JP.id == 0], []),
+        ([{"id": "not a number"}], JP[JP.id == 0], []),
+    ],
+)
+def test_find_all_with_attribute_expressions_are_robust(content, jp, expected_items):
+    items = list(find_all(content, jp))
     assert items == expected_items

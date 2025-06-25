@@ -33,6 +33,28 @@ other indexing and slice expressions also work in the conventional Pythonic way:
 ['Doe, John', 'Doe, Jane']
 
 
+Selecting list items by boolean expressions
+-------------------------------------------
+
+List items can also be selected by simple boolean expressions evaluated within
+the context of a list item, for instance
+
+>>> list(find_all(content, JP.employees[JP.age > 35]))
+[{'name': 'Deer, Jude', 'age': 42, 'account': 'judedeer'}]
+
+Only simple comparisons are supported, and only these operators:
+- `==`, `!=`,
+- `<`, `<=`,
+- `>`, `>=`.
+
+Both operands can be dict keys in a list item, e.g. expressions like
+`JP.years[JP.planned_budget < JP.realized_budget]` are supported.
+
+In addition to this, existence of a sub-item or path also be used as
+a list item selector, e.g. `JP.years[JP.planned_budget]` would select only
+the years where the key `planned_budget` exists.
+
+
 Paths to items iterated
 -----------------------
 

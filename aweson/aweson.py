@@ -7,13 +7,73 @@ from __future__ import annotations
 
 import dataclasses as dc
 import re
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import Any, Callable, Iterator
 
 
 @dc.dataclass(frozen=True, kw_only=True)
-class _Accessor(ABC):
+class _Predicate(ABC):
+    """
+    Abstract base class for predicate based list-item selection.
+    """
+
+    @abstractmethod
+    def _evaluate(self, content) -> bool:
+        """
+        Evaluates this predicate within the context of the given content.
+        """
+
+
+@dc.dataclass(frozen=True, kw_only=True)
+class _BinaryPredicate(_Predicate):
+    """
+    Binary predicate for predicate based list-item selection.
+    """
+
+    operand1: _Accessor
+    operand2: Any
+    func: Callable[[Any, Any], bool]
+    repr_template: str  # format string referring to '{op1}' and '{op2}' variables
+
+    def _evaluate(self, content) -> bool:
+        operand1 = find_next(content, self.operand1, default=None)
+        operand2 = (
+            find_next(content, self.operand2, default=None)
+            if isinstance(self.operand2, _Accessor)
+            else self.operand2
+        )
+        return self.func(operand1, operand2)
+
+    def __str__(self) -> str:
+        op1 = self.operand1._json_path_like(child_context=True)
+        if isinstance(self.operand2, _Accessor):
+            op2 = self.operand2._json_path_like(child_context=True)
+        else:
+            op2 = str(self.operand2)
+        return self.repr_template.format(op1=op1, op2=op2)
+
+
+@dc.dataclass(frozen=True, kw_only=True)
+class _PathExistsPredicate(_Predicate):
+    """
+    A unary predicate telling if a sub-path exists, for predicate based list-item selection.
+    """
+
+    path: _Accessor
+
+    def _evaluate(self, content) -> bool:
+        non_existent = (1,)
+
+        found = find_next(content, self.path, default=non_existent)
+        return found is not non_existent
+
+    def __str__(self):
+        return self.path._json_path_like(child_context=True)
+
+
+@dc.dataclass(frozen=True, kw_only=True)
+class _Accessor:
     """
     Base class for building JSON Path-like expression.
     """
@@ -84,8 +144,21 @@ class _Accessor(ABC):
         return self.parent._accessors() + [self]
 
     def __str__(self):
+        return self._json_path_like()
+
+    def _json_path_like(self, child_context: bool = False):
+        """
+        A (best effort attempt) to render the path, made up
+        by this accessor and its parents, transitively, as a JSON Path.
+
+        Args:
+            child_context: JSON Path uses marker "$" for paths starting
+            from document root, and "@" for paths starting from a child
+            node. This flag controls which context to build the string for.
+        """
         accessors = self._accessors()
-        return "$" + "".join(a._representation() for a in accessors)
+        marker = "@" if child_context else "$"
+        return marker + "".join(a._representation() for a in accessors)
 
     def __getattr__(self, specification):
         """
@@ -108,6 +181,12 @@ class _Accessor(ABC):
                 return _DictKeyAccessor(parent=self, key=specification)
             key_regex = re.compile(specification)
             return _DictKeyRegexAccessor(parent=self, key_regex=key_regex)
+        if isinstance(specification, _Accessor):
+            return _ListPredicateAccessor(
+                parent=self, predicate=_PathExistsPredicate(path=specification)
+            )
+        if isinstance(specification, _Predicate):
+            return _ListPredicateAccessor(parent=self, predicate=specification)
         if isinstance(specification, int):
             return _ListIndexAccessor(parent=self, index=specification)
         if isinstance(specification, slice):
@@ -151,6 +230,54 @@ class _Accessor(ABC):
             )
         raise NotImplementedError("Sub-selection cannot be empty")
 
+    def __eq__(self, other):
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x == y),
+            repr_template="{op1} == {op2}",
+        )
+
+    def __ne__(self, other):
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x != y),
+            repr_template="{op1} != {op2}",
+        )
+
+    def __gt__(self, other):
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x > y),
+            repr_template="{op1} > {op2}",
+        )
+
+    def __ge__(self, other):
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x >= y),
+            repr_template="{op1} >= {op2}",
+        )
+
+    def __lt__(self, other):
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x < y),
+            repr_template="{op1} < {op2}",
+        )
+
+    def __le__(self, other):
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x <= y),
+            repr_template="{op1} <= {op2}",
+        )
+
 
 @dc.dataclass(frozen=True, kw_only=True)
 class _DictKeyAccessor(_Accessor):
@@ -172,6 +299,18 @@ class _DictKeyAccessor(_Accessor):
 
     def _representation(self) -> str:
         return f".{self.key}"
+
+    def __eq__(self, other):
+        """
+        Overloaded == operator in the superclass does not work in sub-classes.
+        Other operators don't seem to have any trouble.
+        """
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x == y),
+            repr_template="{op1} == {op2}",
+        )
 
 
 @dc.dataclass(frozen=True, kw_only=True)
@@ -229,6 +368,53 @@ class _ListIndexAccessor(_Accessor):
     def _representation(self) -> str:
         return f"[{self.index}]"
 
+    def __eq__(self, other):
+        """
+        Overloaded == operator in the superclass does not work in sub-classes.
+        Other operators don't seem to have any trouble.
+        """
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            func=(lambda x, y: x == y),
+            repr_template="{op1} == {op2}",
+        )
+
+
+def _create_list_idx_accessor_ctor(index: int) -> _Accessor:
+    return lambda parent: _ListIndexAccessor(parent=parent, index=index)  # type: ignore
+
+
+@dc.dataclass(frozen=True, kw_only=True)
+class _ListPredicateAccessor(_Accessor):
+    """Accesses items of a list by a predicate"""
+
+    predicate: _Predicate
+    container_type: type = list
+
+    def _is_singular(self) -> bool:
+        return False
+
+    def _access(
+        self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
+    ) -> Iterator[tuple[Any, Callable[[_Accessor], _Accessor] | None]]:
+        _ = lenient  # unused
+        self._check_container_type(container)
+        if yield_path:
+
+            yield from (
+                (item, _create_list_idx_accessor_ctor(current_index))
+                for current_index, item in enumerate(container)
+                if self.predicate._evaluate(item)
+            )
+        else:
+            yield from (
+                (item, None) for item in container if self.predicate._evaluate(item)
+            )
+
+    def _representation(self) -> str:
+        return f"[?{self.predicate}]"
+
 
 @dc.dataclass(frozen=True, kw_only=True)
 class _ListSliceAccessor(_Accessor):
@@ -246,14 +432,10 @@ class _ListSliceAccessor(_Accessor):
         _ = lenient  # unused
         self._check_container_type(container)
         if yield_path:
-
-            def create_accessor_ctor(index: int) -> _Accessor:
-                return lambda parent: _ListIndexAccessor(parent=parent, index=index)  # type: ignore
-
             slice_indices = self.slice_.indices(len(container))
 
             yield from (
-                (item, create_accessor_ctor(current_index))
+                (item, _create_list_idx_accessor_ctor(current_index))
                 for current_index, item in zip(
                     range(slice_indices[0], slice_indices[1], slice_indices[2]),
                     container[self.slice_],
@@ -300,9 +482,7 @@ class _SubHiearchyAccessor(_Accessor):
             yield self.tuple_ctor(items), None
 
     def _representation(self):
-        return (
-            f"({', '.join(str(sub_accessor) for sub_accessor in self.sub_accessors)})"
-        )
+        return f"({', '.join(sub_acc._json_path_like(child_context=True) for sub_acc in self.sub_accessors)})"
 
 
 JP = _Accessor(parent=None, container_type=type(None))
