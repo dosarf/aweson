@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2.2.0 (2025-06-28)
+
+- Support simple predicate expressions as list item selectors
+
 ## 2.1.0 (2025-06-26)
 
 - Utilities: finding duplicates, unique items
