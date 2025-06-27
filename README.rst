@@ -48,11 +48,11 @@ Only simple comparisons are supported, and only these operators:
 - `>`, `>=`.
 
 Both operands can be dict keys in a list item, e.g. expressions like
-`JP.years[JP.planned_budget < JP.realized_budget]` are supported.
+``JP.years[JP.planned_budget < JP.realized_budget]`` are supported.
 
 In addition to this, existence of a sub-item or path also be used as
-a list item selector, e.g. `JP.years[JP.planned_budget]` would select only
-the years where the key `planned_budget` exists.
+a list item selector, e.g. ``JP.years[JP.planned_budget]`` would select only
+the years where the key ``planned_budget`` exists.
 
 
 Paths to items iterated
