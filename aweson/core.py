@@ -43,6 +43,10 @@ class _BinaryPredicate(_Predicate):
             if isinstance(self.operand2, _Accessor)
             else self.operand2
         )
+        # if either of the operands is None, the predicate shall evaluate
+        # False, even if both are None
+        if operand1 is None or operand2 is None:
+            return False
         return self.func(operand1, operand2)
 
     def __str__(self) -> str:
@@ -90,12 +94,35 @@ class _Accessor:
             yield_path: whether to yield a singular path to the item (or items) that are being accessed
             lenient: whether to allow out-of-bounds indexing or missing dict key references to raise
                 IndexError or KeyError, respectively
+
         Returns:
             An iterator to tuples, where there the first field of the tuple is the item being accessed
             at this point, and the second field of the tuple is either ``None``, or a function taking
             a single ``parent`` argument, to create paths leading to those items being accessed.
         """
-        raise NotImplementedError("Root accessor should not be invoked")
+        raise NotImplementedError("Should not be invoked")
+
+    def _access_or_insert(
+        self, container: list | dict, is_penultimate: bool, insert_fun: Callable
+    ):
+        """
+        Similar to ``_access()``, except this one is used for in-place modification of
+        data.
+
+        Args:
+            container: the structure (list or dict) being accessed (or inserted into)
+            is_penultimate: whether this structure (list or dict) is the last-but-one
+            segment in the JSON Path-like expression, i.e. the immediate parent of
+            a leaf data being inserted into.
+            insert_fun: a unary function providing the new value to insert, the argument
+                is the current value if exists, or ``None`` otherwise
+
+        Returns:
+            An iterator of child structures to further descend into with the JSON Path
+            if is_penultimate=False, or the (newly) inserted leaf values if
+            is_penultimate=True.
+        """
+        raise NotImplementedError("Should not be invoked")
 
     def _is_singular(self) -> bool:
         """
@@ -168,7 +195,7 @@ class _Accessor:
         """
         return _DictKeyAccessor(parent=self, key=specification)
 
-    def __getitem__(self, specification):
+    def __getitem__(self, specification):  # pylint: disable=too-many-return-statements
         """
         JSON Path-like expression builder infra.
 
@@ -297,6 +324,15 @@ class _DictKeyAccessor(_Accessor):
         else:
             yield container[self.key], None  # type: ignore
 
+    def _access_or_insert(
+        self, container: list | dict, is_penultimate: bool, insert_fun: Callable
+    ):
+        self._check_container_type(container)
+        if self.key not in container or is_penultimate:
+            container[self.key] = insert_fun(container.get(self.key, None))  # type: ignore
+
+        yield container[self.key]  # type: ignore
+
     def _representation(self) -> str:
         return f".{self.key}"
 
@@ -336,6 +372,16 @@ class _DictKeyRegexAccessor(_Accessor):
                 else:
                     yield value, None
 
+    def _access_or_insert(
+        self, container: list | dict, is_penultimate: bool, insert_fun: Callable
+    ):
+        self._check_container_type(container)
+        for key in container.keys():  # type: ignore
+            if self.key_regex.findall(key):  # pylint: disable=no-member
+                if is_penultimate:
+                    container[key] = insert_fun(container[key])
+                yield container[key]
+
     def _representation(self) -> str:
         return f"[{self.key_regex.pattern}]"  # pylint: disable=no-member
 
@@ -364,6 +410,23 @@ class _ListIndexAccessor(_Accessor):
                 )
         else:
             yield container[self.index], None
+
+    def _access_or_insert(
+        self, container: list | dict, is_penultimate: bool, insert_fun: Callable
+    ):
+        self._check_container_type(container)
+        if self.index == len(container):
+            container.append(insert_fun(None))  # type: ignore
+        elif self.index < len(container):
+            if is_penultimate:
+                container[self.index] = insert_fun(container[self.index])
+            else:
+                pass
+        else:
+            raise ValueError(
+                f"Cannot append at {self.index} to a list with length {len(container)}"
+            )
+        yield container[self.index]
 
     def _representation(self) -> str:
         return f"[{self.index}]"
@@ -412,6 +475,18 @@ class _ListPredicateAccessor(_Accessor):
                 (item, None) for item in container if self.predicate._evaluate(item)
             )
 
+    def _access_or_insert(
+        self, container: list | dict, is_penultimate: bool, insert_fun: Callable
+    ):
+        self._check_container_type(container)
+        if is_penultimate:
+            for index, item in enumerate(container):
+                if self.predicate._evaluate(item):
+                    container[index] = insert_fun(container[index])
+                    yield container[index]
+        else:
+            yield from (item for item in container if self.predicate._evaluate(item))
+
     def _representation(self) -> str:
         return f"[?{self.predicate}]"
 
@@ -443,6 +518,18 @@ class _ListSliceAccessor(_Accessor):
             )
         else:
             yield from ((item, None) for item in container[self.slice_])
+
+    def _access_or_insert(
+        self, container: list | dict, is_penultimate: bool, insert_fun: Callable
+    ):
+        self._check_container_type(container)
+        if is_penultimate:
+            slice_indices = self.slice_.indices(len(container))
+            for index in range(slice_indices[0], slice_indices[1], slice_indices[2]):
+                container[index] = insert_fun(container[index])
+                yield container[index]
+        else:
+            yield from container[self.slice_]
 
     def _representation(self) -> str:
         repr_ = (
@@ -480,6 +567,29 @@ class _SubHiearchyAccessor(_Accessor):
             )
         else:
             yield self.tuple_ctor(items), None
+
+    def _access_or_insert(
+        self, container: list | dict, is_penultimate: bool, insert_fun: Callable
+    ):
+        self._check_container_type(container)
+        for accessor in self.sub_accessors:
+            if (
+                not isinstance(accessor, _DictKeyAccessor)
+                or len(accessor._accessors()) > 2
+            ):
+                raise ValueError(f"Unsupported mutator in sub-hierarchy: {accessor}")
+
+        values = insert_fun(container)
+        if len(values) != len(self.sub_accessors):
+            raise ValueError(
+                f"Value count ({len(values)}) != specs count ({len(self.sub_accessors)})"
+            )
+
+        for sub_accessor, value in zip(self.sub_accessors, values):
+            if sub_accessor.key not in container or is_penultimate:
+                container[sub_accessor.key] = value
+
+        yield values
 
     def _representation(self):
         return f"({', '.join(sub_acc._json_path_like(child_context=True) for sub_acc in self.sub_accessors)})"
@@ -557,64 +667,3 @@ def find_next(
             return (None, default) if with_path else default
     else:
         return next(find_all(root_data, path, with_path=with_path))
-
-
-def _find_all_with_multiplicity(
-    root_data: list | dict | str | int | float | bool,
-    path: _Accessor,
-    *,
-    with_path: bool = False,
-    lenient: bool = False,
-):
-    """
-    Workhorse utility function for finding both unique and duplicate items.
-    """
-    item_func = (lambda i: i[1]) if with_path else (lambda i: i)
-
-    known_items: dict = {}
-
-    for tup in find_all(root_data, path, with_path=with_path, lenient=lenient):
-        item = item_func(tup)
-        if item in known_items:
-            known_items[item] += 1
-        else:
-            known_items[item] = 0
-        yield tup, known_items[item]
-
-
-def find_all_unique(
-    root_data: list | dict | str | int | float | bool,
-    path: _Accessor,
-    *,
-    with_path: bool = False,
-    lenient: bool = False,
-):
-    """
-    Yields unique elemnents, with or without paths.
-    """
-    yield from (
-        item
-        for item, multiplicity in _find_all_with_multiplicity(
-            root_data, path, with_path=with_path, lenient=lenient
-        )
-        if multiplicity == 0
-    )
-
-
-def find_all_duplicate(
-    root_data: list | dict | str | int | float | bool,
-    path: _Accessor,
-    *,
-    with_path: bool = False,
-    lenient: bool = False,
-):
-    """
-    Yields duplicate elemnents, with or without paths.
-    """
-    yield from (
-        item
-        for item, multiplicity in _find_all_with_multiplicity(
-            root_data, path, with_path=with_path, lenient=lenient
-        )
-        if multiplicity > 0
-    )
