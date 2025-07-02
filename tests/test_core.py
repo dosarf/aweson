@@ -1,7 +1,12 @@
 import pytest
 
-from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next
-from aweson.aweson import _Predicate
+from aweson import JP, find_all, find_next
+from aweson.core import _Predicate
+
+###############################################################
+#
+# infra
+#
 
 
 @pytest.mark.parametrize(
@@ -106,6 +111,38 @@ def test_jp_stringification(jp, stringfied):
 )
 def test_path_is_singular(jp, is_singular):
     assert jp.is_singular() == is_singular
+
+
+def test_sub_selection_either_all_unnamed_or_all_named_fields():
+    with pytest.raises(NotImplementedError):
+        JP.hello(JP.some_field, named=JP.other_field)
+
+
+def test_sub_selection_must_not_be_empty():
+    with pytest.raises(NotImplementedError):
+        JP.hello()
+
+
+def test_sub_selection_must_be_path():
+    with pytest.raises(ValueError):
+        JP[:](JP.id, "somestring")
+
+    with pytest.raises(ValueError):
+        JP[:](id_=JP.id, detail="somestring")
+
+
+def test_sub_selection_must_be_singular():
+    with pytest.raises(ValueError):
+        JP[:](JP.id, JP.detail[:])
+
+    with pytest.raises(ValueError):
+        JP[:](id_=JP.id, detail=JP.detail[:])
+
+
+###############################################################
+#
+# find_all()
+#
 
 
 @pytest.mark.parametrize(
@@ -318,32 +355,6 @@ def test_find_all_demo_transformation_named_tuples():
     }
 
 
-def test_sub_selection_either_all_unnamed_or_all_named_fields():
-    with pytest.raises(NotImplementedError):
-        JP.hello(JP.some_field, named=JP.other_field)
-
-
-def test_sub_selection_must_not_be_empty():
-    with pytest.raises(NotImplementedError):
-        JP.hello()
-
-
-def test_sub_selection_must_be_path():
-    with pytest.raises(ValueError):
-        JP[:](JP.id, "somestring")
-
-    with pytest.raises(ValueError):
-        JP[:](id_=JP.id, detail="somestring")
-
-
-def test_sub_selection_must_be_singular():
-    with pytest.raises(ValueError):
-        JP[:](JP.id, JP.detail[:])
-
-    with pytest.raises(ValueError):
-        JP[:](id_=JP.id, detail=JP.detail[:])
-
-
 @pytest.mark.parametrize(
     "content,jp,expected_paths_and_items",
     [
@@ -455,207 +466,14 @@ def test_lenient_find_all_yields_nothing_on_nonexistent_keys(content, jp):
 
 
 @pytest.mark.parametrize(
-    "content,jp,with_path,expected_value",
+    "content, jp",
     [
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[:].hello,
-            False,
-            5,
-        ),
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[1].hello,
-            False,
-            42,
-        ),
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[:].hello,
-            True,
-            (JP[0].hello, 5),
-        ),
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[1].hello,
-            True,
-            (JP[1].hello, 42),
-        ),
+        ([], JP[:].hello[13].hi),
+        ({}, JP.hello[13].hi[:]),
     ],
 )
-def test_find_next(content, jp, with_path, expected_value):
-    assert find_next(content, jp, with_path=with_path) == expected_value
-
-
-@pytest.mark.parametrize(
-    "content,jp,with_path,default",
-    [
-        # cases: slice with empty list
-        ([], JP[:].hello, False, 17),
-        ([], JP[:].hello, True, (None, 17)),
-        # cases: ignoring index error
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[2].hello,
-            False,
-            5,
-        ),
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[2].hello,
-            True,
-            (None, 5),
-        ),
-        # cases: ignoring key error
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[2].hi,
-            False,
-            5,
-        ),
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[2].hi,
-            True,
-            (None, 5),
-        ),
-    ],
-)
-def test_find_next_with_default(content, jp, with_path, default):
-    assert find_next(content, jp, with_path=with_path, default=default)
-
-
-@pytest.mark.parametrize(
-    "content,jp,with_path,expected_items",
-    [
-        ([1, 2, 1, 3, -22, 3], JP[:], False, [1, 2, 3, -22]),
-        (
-            [1, 2, 1, 3, -22, 3],
-            JP[:],
-            True,
-            [(JP[0], 1), (JP[1], 2), (JP[3], 3), (JP[4], -22)],
-        ),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:].hello,
-            False,
-            [1, 2, 3, -22],
-        ),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:].hello,
-            True,
-            [(JP[0].hello, 1), (JP[1].hello, 2), (JP[3].hello, 3), (JP[4].hello, -22)],
-        ),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:4].hello,
-            False,
-            [1, 2, 3],
-        ),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:4].hello,
-            True,
-            [(JP[0].hello, 1), (JP[1].hello, 2), (JP[3].hello, 3)],
-        ),
-    ],
-)
-def test_find_all_unique(content, jp, with_path, expected_items):
-    items = list(find_all_unique(content, jp, with_path=with_path))
-    assert items == expected_items
-
-
-@pytest.mark.parametrize(
-    "content,jp,with_path,expected_items",
-    [
-        ([1, 2, 1, 3, -22, 3], JP[:], False, [1, 3]),
-        ([1, 2, 1, 3, -22, 3], JP[:], True, [(JP[2], 1), (JP[5], 3)]),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:].hello,
-            False,
-            [1, 3],
-        ),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:].hello,
-            True,
-            [(JP[2].hello, 1), (JP[5].hello, 3)],
-        ),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:3].hello,
-            False,
-            [1],
-        ),
-        (
-            [
-                {"hello": 1},
-                {"hello": 2},
-                {"hello": 1},
-                {"hello": 3},
-                {"hello": -22},
-                {"hello": 3},
-            ],
-            JP[:3].hello,
-            True,
-            [(JP[2].hello, 1)],
-        ),
-    ],
-)
-def test_find_all_duplicates(content, jp, with_path, expected_items):
-    items = list(find_all_duplicate(content, jp, with_path=with_path))
-    assert items == expected_items
+def test_lenient_find_all_yields_nothing_mixed_case(content, jp):
+    assert list(find_all(content, jp, lenient=True)) == []
 
 
 @pytest.mark.parametrize(
@@ -764,3 +582,85 @@ def test_find_all_with_attribute_expressions_all_operators(
 def test_find_all_with_attribute_expressions_are_robust(content, jp, expected_items):
     items = list(find_all(content, jp))
     assert items == expected_items
+
+
+###############################################################
+#
+# find_next()
+#
+
+
+@pytest.mark.parametrize(
+    "content,jp,with_path,expected_value",
+    [
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[:].hello,
+            False,
+            5,
+        ),
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[1].hello,
+            False,
+            42,
+        ),
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[:].hello,
+            True,
+            (JP[0].hello, 5),
+        ),
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[1].hello,
+            True,
+            (JP[1].hello, 42),
+        ),
+    ],
+)
+def test_find_next(content, jp, with_path, expected_value):
+    assert find_next(content, jp, with_path=with_path) == expected_value
+
+
+@pytest.mark.parametrize(
+    "content,jp,with_path,default",
+    [
+        # cases: slice with empty list
+        ([], JP[:].hello, False, 17),
+        ([], JP[:].hello, True, (None, 17)),
+        # cases: ignoring index error
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[2].hello,
+            False,
+            5,
+        ),
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[2].hello,
+            True,
+            (None, 5),
+        ),
+        # cases: ignoring key error
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[2].hi,
+            False,
+            5,
+        ),
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[2].hi,
+            True,
+            (None, 5),
+        ),
+        # cases: mixed, long paths
+        ([], JP[:].hello[13].hi, False, 5),
+        ([], JP[:].hello[13].hi, True, (None, 5)),
+        ({}, JP.hello[13].hi[:], False, 5),
+        ([], JP[:].hello[13].hi, True, (None, 5)),
+    ],
+)
+def test_find_next_with_default(content, jp, with_path, default):
+    assert find_next(content, jp, with_path=with_path, default=default)
