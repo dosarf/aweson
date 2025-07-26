@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 3.0.0 (2025-07-26)
+
+- Support content manipulation (with_values())
+- Sub-item selection: instead of named tuples, produce dicts, more
+  in line with JSON
+
 ## 2.2.0 (2025-06-28)
 
 - Support simple predicate expressions as list item selectors
