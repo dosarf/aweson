@@ -283,7 +283,7 @@ def test_find_all_mixed_hierarchy(content, jp, expected_items):
         ),
     ],
 )
-def test_find_all_sub_selection(content, jp, expected_items):
+def test_find_all_sub_selection_tuple(content, jp, expected_items):
     items = list(find_all(content, jp))
     assert items == expected_items
 
@@ -296,8 +296,8 @@ def test_find_all_sub_selection(content, jp, expected_items):
                 {"hello": "world", "hi": [5, 42, 137]},
                 {"hello": "mundo", "hi": [-5, -42, -137]},
             ],
-            JP[:](id_=JP.hello, detail=JP.hi[1]),
-            [("world", 42), ("mundo", -42)],
+            JP[:](id=JP.hello, detail=JP.hi[1]),
+            [{"id": "world", "detail": 42}, {"id": "mundo", "detail": -42}],
         ),
         (
             {
@@ -307,17 +307,17 @@ def test_find_all_sub_selection(content, jp, expected_items):
                     {"name": "Deer, Jude", "age": 42, "account": "judedeer"},
                 ]
             },
-            JP.employees[:2](id_=JP.account, detail=JP.name),
-            [("johndoe", "Doe, John"), ("janedoe", "Doe, Jane")],
+            JP.employees[:2](id=JP.account, detail=JP.name),
+            [
+                {"id": "johndoe", "detail": "Doe, John"},
+                {"id": "janedoe", "detail": "Doe, Jane"},
+            ],
         ),
     ],
 )
-def test_find_all_sub_selection_named_tuple(content, jp, expected_items):
+def test_find_all_sub_selection(content, jp, expected_items):
     items = list(find_all(content, jp))
-    assert len(items) == len(expected_items)
-    for item, expected_item in zip(items, expected_items):
-        assert item.id_ == expected_item[0]
-        assert item.detail == expected_item[1]
+    assert items == expected_items
 
 
 def test_find_all_demo_transformation():
@@ -345,8 +345,8 @@ def test_find_all_demo_transformation_named_tuples():
     ]
 
     id_to_value_map = {
-        tup.id_: tup.value
-        for tup in find_all(list_of_entities, JP[:](id_=JP.id, value=JP.value))
+        tup["id"]: tup["value"]
+        for tup in find_all(list_of_entities, JP[:](id=JP.id, value=JP.value))
     }
     assert id_to_value_map == {
         5: "five",

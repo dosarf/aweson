@@ -8,7 +8,6 @@ from __future__ import annotations
 import dataclasses as dc
 import re
 from abc import ABC, abstractmethod
-from collections import namedtuple
 from typing import Any, Callable, Iterator
 
 
@@ -244,16 +243,15 @@ class _Accessor:
         if len(paths) > 0:
             verify_paths(paths)
             return _SubHiearchyAccessor(
-                parent=self, sub_accessors=paths, tuple_ctor=tuple
+                parent=self, sub_accessors=paths, sub_hierarchy_ctor=tuple
             )
         if len(named_paths) > 0:
             paths = list(named_paths.values())
             verify_paths(paths)
-            named_tuple = namedtuple("SubSelect", list(named_paths.keys()))
             return _SubHiearchyAccessor(
                 parent=self,
                 sub_accessors=paths,
-                tuple_ctor=lambda values: named_tuple(*values),
+                sub_hierarchy_ctor=lambda values: dict(zip(named_paths.keys(), values)),
             )
         raise NotImplementedError("Sub-selection cannot be empty")
 
@@ -547,7 +545,7 @@ class _SubHiearchyAccessor(_Accessor):
     """
 
     sub_accessors: list[_Accessor]
-    tuple_ctor: Any
+    sub_hierarchy_ctor: Callable
     container_type: type = dict
 
     def _access(
@@ -560,13 +558,13 @@ class _SubHiearchyAccessor(_Accessor):
             for sub_accessor in self.sub_accessors
         ]
         if yield_path:
-            yield self.tuple_ctor(items), lambda parent: _SubHiearchyAccessor(
+            yield self.sub_hierarchy_ctor(items), lambda parent: _SubHiearchyAccessor(
                 parent=parent,
                 sub_accessors=self.sub_accessors,
-                tuple_ctor=self.tuple_ctor,
+                sub_hierarchy_ctor=self.sub_hierarchy_ctor,
             )
         else:
-            yield self.tuple_ctor(items), None
+            yield self.sub_hierarchy_ctor(items), None
 
     def _access_or_insert(
         self, container: list | dict, is_penultimate: bool, insert_fun: Callable

@@ -4,7 +4,7 @@ aweson
 Traversing and manipulating hierarchical data (think JSON) using
 pythonic `JSON Path`_ -like expressions. This library doesn't support
 every JSON Path notation, but it has it's own tricks to offer, e.g.
-`sub-items <subitems>`_ and `with_values() <withvalues>`_.
+``with_values()``.
 
 
 Importing:
@@ -39,7 +39,7 @@ To address all items in a list, Pythonic slice expression
 >>> list(find_all(content, JP.employees[:2].name))
 ['Doe, John', 'Doe, Jane']
 
-    These indexing and slicing expressions are valid explressions for both `JSON Path`_
+    These indexing and slicing expressions are valid expressions for both `JSON Path`_
     and Python. The more conventional JSON Path notation for selecting all items of a list,
     ``$.some_array[*]``, is (sort of) supported, only as ``JP.some_array["*"]``.
 
@@ -47,8 +47,8 @@ To address all items in a list, Pythonic slice expression
 Selecting list items by boolean expressions
 -------------------------------------------
 
-List item dictionaries can also be selected by simple boolean expressions evaluated within
-the context of each list item dictionary, for instance
+Dictionaries in lists can also be selected by simple boolean expressions evaluated within
+the context of each such dictionary, for instance
 
 >>> list(find_all(content, JP.employees[JP.age > 35]))
 [{'name': 'Deer, Jude', 'age': 42, 'account': 'judedeer'}]
@@ -59,7 +59,7 @@ Only simple comparisons are supported, and only these operators: ``==``, ``!=``,
     Both operands can be dict keys in a list item, e.g. expressions like
     ``JP.years[JP.planned_budget < JP.realized_budget]`` are supported.
 
-In addition to this, existence of a sub-item or path also be used as
+In addition to this, existence of a sub-item or path can also be used as
 a list item selector, e.g. ``JP.years[JP.planned_budget]`` would select only
 the years where the key ``planned_budget`` exists.
 
@@ -85,7 +85,7 @@ or even
 >>> list(find_all(content, JP[".*"][:].name))
 ['red delicious', 'punakaneli', 'wilhelm', 'conference']
 
-if You are interested in fruits other than apples and pears.
+if You are interested in everything, not only apples and pears.
 
 
 Paths to items iterated
@@ -114,29 +114,37 @@ value:
 ... ]}
 >>> path, item = next(tup for tup in find_all(
 ...     content,
-...     JP.employees[JP.age < 0].age,
+...     JP.employees[JP.age < 0],
 ...     with_path=True
 ... ))
 >>> item
--23
+{'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
 
 The path to the item found is:
 
 >>> str(path)
-'$.employees[1].age'
+'$.employees[1]'
 
 The path object yielded along is a JSON Path-like object, just as if You
-constructed it as ``JP.employee[1].age``. These JSON Path-like
-objects have a field called ``.parent``, so that You can
-access the parent data structure:
-
->>> next(find_all(content, path.parent))
-{'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
+constructed it as ``JP.employee[1]``.
 
     With argument ``with_path=True`` passed, ``find_all()`` yields tuples
     instead of items only. The first item of a yielded tuple is the path object,
     and the second item is the item itself. This is consistent with ``enumerate()``
     behavior.
+
+Also, the JSON Path-like objects have a field called ``.parent``, so that You can
+access the parent data structure, consider a path object you've obtained. You
+can dig out its respective value:
+
+>>> path = JP.employees[1].name
+>>> next(find_all(content, path))
+'Doe, Jane'
+
+But if you want to have access to the containing structure, use ``.parent``:
+
+>>> next(find_all(content, path.parent))
+{'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
 
 
 .. _subitems:
@@ -158,13 +166,12 @@ into another, like a list of records into a ``dict``:
     The sub-item selection, while slightly more verbose, is arguably more
     declarative.
 
-You can also make a sub-items selection produce `named tuples` by explicitly naming sub-paths:
+You can also make a sub-items selection produce dictionaries by explicitly naming sub-paths:
 
 >>> list(find_all(content, JP.employees[:](id=JP.account, username=JP.name)))
-[{'id': 'johndoe', 'username': 'Doe, John'}, {'id': 'janedoe', 'username': 'Doe, Jane'}]
-[SubSelect(id='johndoe', username='Doe, John'), SubSelect(id='janedoe', username='Doe, Jane'), SubSelect(id='judedeer', username='Deer, Jude')]
+[{'id': 'johndoe', 'username': 'Doe, John'}, {'id': 'janedoe', 'username': 'Doe, Jane'}, {'id': 'judedeer', 'username': 'Deer, Jude'}]
 
-In the code above, the key ``"account"`` is rendered as field ``id``,
+In the code above, the key ``"account"`` is rendered as ``id``,
 and ``"name"`` as ``username``.
 
 
@@ -246,7 +253,7 @@ as argument to the function, and this form is good for re-calculating
 an existing value. If You want to add a new key/value pair to a dictionary,
 You can achieve that in one of two ways:
 
-- Iterate over dictionary items, receiving dictionaries as argument to Your
+- Iterate over dictionaries of the list, receiving each dictionary as argument to Your
   function, and re-calculate entire dictionaries:
 
 >>> with_values(
@@ -256,9 +263,9 @@ You can achieve that in one of two ways:
 ... )
 [{'msg': 'hallo', 'msg_startswith_h': True}, {'msg': 'hello', 'msg_startswith_h': True}, {'msg': 'bye', 'msg_startswith_h': False}]
 
-- Iterate over dictionary items, receiving dictionaries as argument to
+- Iterate over dictionaries of the list, receiving each dictionary as argument to
   Your function just as above, but use the
-  `sub-items <subitems>`_ expression, to compose dictionary content
+  `sub-item expression`, to compose dictionary content
   for You, e.g. adding even two keys ( ``"id"`` and ``"verdict"`` ) now, to each
   dictionary item:
 
