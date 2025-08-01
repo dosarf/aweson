@@ -48,6 +48,19 @@ class _BinaryPredicate(_Predicate):
             return False
         return self.func(operand1, operand2)
 
+    def __bool__(self):
+        """
+        BinaryPredicate is primarily to serve as an infra for expressions like
+        ``JP[JP.field1 == JP.field2]``. But what if someone just wants to test for
+        path equivalence, like ``JP.field1 == JP.field2`` or ``JP.field1 != JP.field2``?
+        Then this converter dunder method kicks in.
+        """
+        if "==" in self.repr_template:
+            return str(self.operand1) == str(self.operand2)
+        if "!=" in self.repr_template:
+            return str(self.operand1) != str(self.operand2)
+        raise NotImplementedError("Unsupported comparison of paths")
+
     def __str__(self) -> str:
         op1 = self.operand1._json_path_like(child_context=True)
         if isinstance(self.operand2, _Accessor):
@@ -594,6 +607,46 @@ class _SubHiearchyAccessor(_Accessor):
 
 
 JP = _Accessor(parent=None, container_type=type(None))
+
+
+PATTERN_SEGMENT = re.compile(
+    """
+        \[(?P<slice1_stop>-?\\d+)\]
+        | \[(?P<slice2>(?P<slice2_start>-?\\d+)?:(?P<slice2_stop>-?\\d+)?)\]
+        | \[(?P<star>\*)\]
+        | \.(?P<field>[^\.\[]+)
+    """,
+    re.VERBOSE
+)
+
+
+def parse(json_path: str) -> _Accessor:
+    """
+    TODO
+    """
+    if not json_path.startswith("$"):
+        raise ValueError("TODO")
+
+    accessor = JP
+
+    path = json_path[1:]
+
+    for segment_match in PATTERN_SEGMENT.finditer(path):
+        if field := segment_match.group("field"):
+            accessor = accessor[field]
+        elif slice1_stop := segment_match.group("slice1_stop"):
+            accessor = accessor[int(slice1_stop)]
+        elif segment_match.group("slice2"):
+            slice2_start = segment_match.group("slice2_start")
+            slice2_stop = segment_match.group("slice2_stop")
+            s = slice(int(slice2_start) if slice2_start else None, int(slice2_stop) if slice2_stop else None)
+            accessor = accessor[s]
+        elif segment_match.group("star"):
+            accessor = accessor[:]
+        else:
+            raise ValueError("TODO")
+
+    return accessor
 
 
 def find_all(

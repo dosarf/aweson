@@ -1,12 +1,29 @@
 import pytest
 
 from aweson import JP, find_all, find_next
-from aweson.core import _Predicate
+from aweson.core import _Predicate, parse, _Accessor
+
 
 ###############################################################
 #
 # infra
 #
+
+def test_root_accessors_are_equivalent():
+    a_root = _Accessor(parent=None, container_type=type(None))
+    assert JP == a_root
+    assert a_root == _Accessor(parent=None, container_type=type(None))
+
+
+@pytest.mark.parametrize("path1, path2", [
+    (JP, JP.hello),
+    (JP, JP[0]),
+    (JP.hello, JP[0]),
+    (JP.hello, JP.hi),
+    (JP[0], JP[1]),
+])
+def test_different_paths_are_not_equivalent(path1, path2):
+    assert path1 != path2
 
 
 @pytest.mark.parametrize(
@@ -46,6 +63,12 @@ from aweson.core import _Predicate
 )
 def test_overloaded_bool_operators(jp_bool):
     assert isinstance(jp_bool, _Predicate)
+
+
+###############################################################
+#
+# str()
+#
 
 
 @pytest.mark.parametrize(
@@ -92,6 +115,60 @@ def test_overloaded_bool_operators(jp_bool):
 )
 def test_jp_stringification(jp, stringfied):
     assert str(jp) == stringfied
+
+
+###############################################################
+#
+# parse()
+#
+
+
+@pytest.mark.parametrize("jp, path", [
+    (JP, "$"),
+    (JP.hello, "$.hello"),
+    (JP.hello.world, "$.hello.world"),
+    (JP[0], "$[0]"),
+    (JP[42], "$[42]"),
+    (JP[-1], "$[-1]"),
+    (JP[5][42], "$[5][42]"),
+    (JP[1:2], "$[1:2]"),
+    (JP[-2:-1], "$[-2:-1]"),
+    (JP[1:], "$[1:]"),
+    (JP[:2], "$[:2]"),
+    (JP[:-1], "$[:-1]"),
+    (JP[12:], "$[12:]"),
+    (JP[-2:], "$[-2:]"),
+    (JP[:], "$[:]"),
+    (JP[:], "$[*]"),
+    # (JP[JP == 0], "$[?@ == 0]"),
+    # (JP[JP != 0], "$[?@ != 0]"),
+    # (JP[JP > 0], "$[?@ > 0]"),
+    # (JP[JP >= 0], "$[?@ >= 0]"),
+    # (JP[JP < 0], "$[?@ < 0]"),
+    # (JP[JP <= 0], "$[?@ <= 0]"),
+    # (JP[JP.id], "$[?@.id]"),
+    # (JP[JP.id == 0], "$[?@.id == 0]"),
+    # (JP.products[JP == 0], "$.products[?@ == 0]"),
+    # (JP.products[JP.id], "$.products[?@.id]"),
+    # (JP.products[JP.price > 120], "$.products[?@.price > 120]"),
+    # (JP.products[JP.price > JP.avg_price], "$.products[?@.price > @.avg_price]"),
+    # # (JP[::], "$[:]"),
+    # (JP[1::], "$[1:]"),
+    # (JP[:2], "$[:2]"),
+    # (JP[:2:], "$[:2]"),
+    # (JP[::-1], "$[::-1]"),
+    # (JP[1:12:-1], "$[1:12:-1]"),
+    # (JP[5].hello, "$[5].hello"),
+    # (JP.hello[5], "$.hello[5]"),
+    # (JP["hello|hi"].id, "$[hello|hi].id"),
+    # (JP[5].hello[42].world, "$[5].hello[42].world"),
+    # (JP.hello[5].world[42], "$.hello[5].world[42]"),
+    # (JP["hello"][5]["world"][42], "$.hello[5].world[42]"),
+    # (JP.hello(JP.world, JP.hi[0]), "$.hello(@.world, @.hi[0])"),
+])
+def test_parse(jp, path):
+    parsed_jp = parse(path)
+    assert parsed_jp == jp
 
 
 @pytest.mark.parametrize(
