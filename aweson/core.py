@@ -6,8 +6,10 @@ Infra for JSON Path-like expressions and finding items in data hiearchy.
 from __future__ import annotations
 
 import dataclasses as dc
+import json
 import re
 from abc import ABC, abstractmethod
+from json import JSONDecodeError
 from typing import Any, Callable, Iterator
 
 
@@ -24,7 +26,7 @@ class _Predicate(ABC):
         """
 
 
-@dc.dataclass(frozen=True, kw_only=True)
+@dc.dataclass(frozen=True, kw_only=True, eq=True)
 class _BinaryPredicate(_Predicate):
     """
     Binary predicate for predicate based list-item selection.
@@ -32,29 +34,73 @@ class _BinaryPredicate(_Predicate):
 
     operand1: _Accessor
     operand2: Any
-    func: Callable[[Any, Any], bool]
+    func: Callable[[Any, Any], bool] = dc.field(compare=False)
     repr_template: str  # format string referring to '{op1}' and '{op2}' variables
 
     def _evaluate(self, content) -> bool:
-        operand1 = find_next(content, self.operand1, default=None)
+        non_existent = (1,)
+        operand1 = find_next(content, self.operand1, default=non_existent)
         operand2 = (
-            find_next(content, self.operand2, default=None)
+            find_next(content, self.operand2, default=non_existent)
             if isinstance(self.operand2, _Accessor)
             else self.operand2
         )
-        # if either of the operands is None, the predicate shall evaluate
-        # False, even if both are None
+        if (operand1 is non_existent) or (operand2 is non_existent):
+            return False
+        if operand1 is None and operand2 is None:
+            return True
         if operand1 is None or operand2 is None:
             return False
         return self.func(operand1, operand2)
 
+    def __bool__(self):
+        """
+        BinaryPredicate is primarily to serve as an infra for expressions like
+        ``JP[JP.field1 == JP.field2]``. But what if someone just wants to test for
+        path equivalence, like ``JP.field1 == JP.field2`` or ``JP.field1 != JP.field2``?
+        Then this converter dunder method kicks in.
+        """
+        if "==" in self.repr_template:
+            return str(self.operand1) == str(self.operand2)
+        if "!=" in self.repr_template:
+            return str(self.operand1) != str(self.operand2)
+        raise NotImplementedError("Unsupported comparison of paths")
+
     def __str__(self) -> str:
-        op1 = self.operand1._json_path_like(child_context=True)
+        op1 = f"?{self.operand1._json_path_like(child_context=True)}"
         if isinstance(self.operand2, _Accessor):
-            op2 = self.operand2._json_path_like(child_context=True)
+            op2 = f"?{self.operand2._json_path_like(child_context=True)}"
         else:
-            op2 = str(self.operand2)
+            op2 = json.dumps(self.operand2)
         return self.repr_template.format(op1=op1, op2=op2)
+
+
+_BINARY_PREDICATE_ARGS = {
+    "==": {
+        "func": (lambda x, y: x == y),
+        "repr_template": "{op1} == {op2}",
+    },
+    "!=": {
+        "func": (lambda x, y: x != y),
+        "repr_template": "{op1} != {op2}",
+    },
+    "<": {
+        "func": (lambda x, y: x < y),
+        "repr_template": "{op1} < {op2}",
+    },
+    "<=": {
+        "func": (lambda x, y: x <= y),
+        "repr_template": "{op1} <= {op2}",
+    },
+    ">": {
+        "func": (lambda x, y: x > y),
+        "repr_template": "{op1} > {op2}",
+    },
+    ">=": {
+        "func": (lambda x, y: x >= y),
+        "repr_template": "{op1} >= {op2}",
+    },
+}
 
 
 @dc.dataclass(frozen=True, kw_only=True)
@@ -72,7 +118,7 @@ class _PathExistsPredicate(_Predicate):
         return found is not non_existent
 
     def __str__(self):
-        return self.path._json_path_like(child_context=True)
+        return f"?{self.path._json_path_like(child_context=True)}"
 
 
 @dc.dataclass(frozen=True, kw_only=True)
@@ -243,7 +289,10 @@ class _Accessor:
         if len(paths) > 0:
             verify_paths(paths)
             return _SubHiearchyAccessor(
-                parent=self, sub_accessors=paths, sub_hierarchy_ctor=tuple
+                parent=self,
+                sub_accessors=paths,
+                sub_hierarchy_ctor=tuple,
+                field_name_mapping=tuple(),
             )
         if len(named_paths) > 0:
             paths = list(named_paths.values())
@@ -252,6 +301,7 @@ class _Accessor:
                 parent=self,
                 sub_accessors=paths,
                 sub_hierarchy_ctor=lambda values: dict(zip(named_paths.keys(), values)),
+                field_name_mapping=tuple(named_paths.keys()),
             )
         raise NotImplementedError("Sub-selection cannot be empty")
 
@@ -259,48 +309,42 @@ class _Accessor:
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x == y),
-            repr_template="{op1} == {op2}",
+            **_BINARY_PREDICATE_ARGS["=="],
         )
 
     def __ne__(self, other):
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x != y),
-            repr_template="{op1} != {op2}",
+            **_BINARY_PREDICATE_ARGS["!="],
         )
 
     def __gt__(self, other):
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x > y),
-            repr_template="{op1} > {op2}",
+            **_BINARY_PREDICATE_ARGS[">"],
         )
 
     def __ge__(self, other):
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x >= y),
-            repr_template="{op1} >= {op2}",
+            **_BINARY_PREDICATE_ARGS[">="],
         )
 
     def __lt__(self, other):
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x < y),
-            repr_template="{op1} < {op2}",
+            **_BINARY_PREDICATE_ARGS["<"],
         )
 
     def __le__(self, other):
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x <= y),
-            repr_template="{op1} <= {op2}",
+            **_BINARY_PREDICATE_ARGS["<="],
         )
 
 
@@ -342,8 +386,7 @@ class _DictKeyAccessor(_Accessor):
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x == y),
-            repr_template="{op1} == {op2}",
+            **_BINARY_PREDICATE_ARGS["=="],
         )
 
 
@@ -437,8 +480,7 @@ class _ListIndexAccessor(_Accessor):
         return _BinaryPredicate(
             operand1=self,
             operand2=other,
-            func=(lambda x, y: x == y),
-            repr_template="{op1} == {op2}",
+            **_BINARY_PREDICATE_ARGS["=="],
         )
 
 
@@ -486,7 +528,18 @@ class _ListPredicateAccessor(_Accessor):
             yield from (item for item in container if self.predicate._evaluate(item))
 
     def _representation(self) -> str:
-        return f"[?{self.predicate}]"
+        return f"[{self.predicate}]"
+
+    def __eq__(self, other):
+        """
+        Overloaded == operator in the superclass does not work in sub-classes.
+        Other operators don't seem to have any trouble.
+        """
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            **_BINARY_PREDICATE_ARGS["=="],
+        )
 
 
 @dc.dataclass(frozen=True, kw_only=True)
@@ -537,6 +590,17 @@ class _ListSliceAccessor(_Accessor):
         )
         return repr_
 
+    def __eq__(self, other):
+        """
+        Overloaded == operator in the superclass does not work in sub-classes.
+        Other operators don't seem to have any trouble.
+        """
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            **_BINARY_PREDICATE_ARGS["=="],
+        )
+
 
 @dc.dataclass(frozen=True, kw_only=True)
 class _SubHiearchyAccessor(_Accessor):
@@ -547,6 +611,7 @@ class _SubHiearchyAccessor(_Accessor):
     sub_accessors: list[_Accessor]
     sub_hierarchy_ctor: Callable
     container_type: type = dict
+    field_name_mapping: tuple[str, ...]
 
     def _access(
         self, container: list | dict, *, yield_path: bool = False, lenient: bool = False
@@ -562,6 +627,7 @@ class _SubHiearchyAccessor(_Accessor):
                 parent=parent,
                 sub_accessors=self.sub_accessors,
                 sub_hierarchy_ctor=self.sub_hierarchy_ctor,
+                field_name_mapping=self.field_name_mapping,
             )
         else:
             yield self.sub_hierarchy_ctor(items), None
@@ -590,10 +656,133 @@ class _SubHiearchyAccessor(_Accessor):
         yield values
 
     def _representation(self):
-        return f"({', '.join(sub_acc._json_path_like(child_context=True) for sub_acc in self.sub_accessors)})"
+        sub_paths = [
+            sub_acc._json_path_like(child_context=True)
+            for sub_acc in self.sub_accessors
+        ]
+        if self.field_name_mapping:
+            assert len(self.field_name_mapping) == len(self.sub_accessors)
+            expression = ", ".join(
+                (
+                    f"{name}={sub_path}"
+                    for name, sub_path in zip(self.field_name_mapping, sub_paths)
+                )
+            )
+        else:
+            expression = ", ".join(sub_paths)
+        # return f"({', '.join(sub_paths)})"
+        return f"({expression})"
+
+    def __eq__(self, other):
+        """
+        Overloaded == operator in the superclass does not work in sub-classes.
+        Other operators don't seem to have any trouble.
+        """
+        return _BinaryPredicate(
+            operand1=self,
+            operand2=other,
+            **_BINARY_PREDICATE_ARGS["=="],
+        )
 
 
 JP = _Accessor(parent=None, container_type=type(None))
+
+
+def _parse_operand(operand: str) -> None | str | int | float | bool | _Accessor:
+    if operand.startswith("?@"):
+        path_maybe = operand.replace("?@", "$", 1)
+        return parse(path_maybe)
+
+    try:
+        value = json.loads(operand)
+        return value
+    except JSONDecodeError as err:
+        raise ValueError(f"{operand} is not a JSON value") from err
+
+
+PATTERN_SEGMENT = re.compile(
+    """
+        \\[(?P<slice1_stop>-?\\d+)]
+        | \\[(?P<slice2>(?P<slice2_start>-?\\d+)?:(?P<slice2_stop>-?\\d+)?)]
+        | \\[(?P<star>\\*)]
+        | \\[(?P<slice3>(?P<slice3_start>-?\\d+)?:(?P<slice3_stop>-?\\d+)?:(?P<slice3_step>-?\\d+)?)]
+        | \\[(?P<tested_path>\\?@[^ ]+)]
+        | \\[(?P<operand1>[^ ]+)\\ *(?P<operator><=|>=|==|!=|<|>)\\ *(?P<operand2>.+)]
+        | \\.(?P<field>[^.[(]+)
+        | \\[(?P<regex>.*)]
+        | \\((?P<subitems>[^=]+)\\)
+        | \\((?P<named_subitems>(.*=.*)+)\\)
+    """,
+    re.VERBOSE,
+)
+
+
+def parse(  # pylint: disable=too-many-locals,too-many-branches
+    json_path: str,
+) -> _Accessor:
+    """
+    Parses a stringified form of a JSON Path-like object. There is an overlap with
+    standard JSON Path expressions, but there are JSON Path expressions not supported by
+    this library and features of this library which are not standard JSON Path expressions.
+    """
+    if not json_path.startswith(("$", "@")):
+        raise ValueError("TODO")
+
+    accessor = JP
+
+    path = json_path[1:]
+
+    for segment_match in PATTERN_SEGMENT.finditer(path):
+        if field := segment_match.group("field"):
+            accessor = accessor[field]
+        elif slice1_stop := segment_match.group("slice1_stop"):
+            accessor = accessor[int(slice1_stop)]
+        elif segment_match.group("slice2"):
+            start = segment_match.group("slice2_start")
+            stop = segment_match.group("slice2_stop")
+            s = slice(int(start) if start else None, int(stop) if stop else None)
+            accessor = accessor[s]
+        elif segment_match.group("slice3"):
+            start = segment_match.group("slice3_start")
+            stop = segment_match.group("slice3_stop")
+            step = segment_match.group("slice3_step")
+            s = slice(
+                int(start) if start else None,
+                int(stop) if stop else None,
+                int(step) if step else None,
+            )
+            accessor = accessor[s]
+        elif tested_path := segment_match.group("tested_path"):
+            path = _parse_operand(tested_path)  # type: ignore
+            predicate = _PathExistsPredicate(path=path)  # type: ignore
+            accessor = accessor[predicate]
+        elif operator := segment_match.group("operator"):
+            operand1 = _parse_operand(segment_match.group("operand1"))
+            operand2 = _parse_operand(segment_match.group("operand2"))
+            predicate = _BinaryPredicate(
+                operand1=operand1, operand2=operand2, **_BINARY_PREDICATE_ARGS[operator]  # type: ignore
+            )
+            accessor = accessor[predicate]
+        elif segment_match.group("star"):
+            accessor = accessor[:]
+        elif regex := segment_match.group("regex"):
+            _ = re.compile(regex)
+            accessor = accessor[regex]
+        elif subitems := segment_match.group("subitems"):
+            subitem_list = [parse(subitem.strip()) for subitem in subitems.split(",")]
+            accessor = accessor(*subitem_list)
+        elif named_subitems := segment_match.group("named_subitems"):
+            key_value_pattern = re.compile("(?P<key>\\w+)\\s*=\\s*(?P<value>\\S+)")
+            named_subitem_list = {
+                match["key"]: parse(match["value"])
+                for named_subitem in named_subitems.split(",")
+                if (match := key_value_pattern.match(named_subitem.strip()))
+            }
+            accessor = accessor(**named_subitem_list)
+        else:
+            raise ValueError("TODO")
+
+    return accessor
 
 
 def find_all(

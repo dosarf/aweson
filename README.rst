@@ -2,14 +2,13 @@ aweson
 ======
 
 Traversing and manipulating hierarchical data (think JSON) using
-pythonic `JSON Path`_ -like expressions. This library doesn't support
-every JSON Path notation, but it has it's own tricks to offer, e.g.
-``with_values()``.
+pythonic `JSON Path`_ -like expressions.
 
 
-Importing:
+Import
+------
 
->>> from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next, with_values
+>>> from aweson import JP, find_all, find_all_duplicate, find_all_unique, find_next, parse, with_values
 
 
 Iterating over hierarchical data
@@ -25,7 +24,7 @@ Iterating over hierarchical data
 
     The JSON Path-like expression ``JP.employees[:].name`` is `not` a string.
     Most JSON Path supporting libraries, like `python-jsonpath`_, `jsonpath-rfc9535`_
-    have the JSON Path as a string, which they parse.
+    have the JSON Path as a string, parsed.
     Using this library You build a `Python expression`, parsed and interpreted
     by Python itself. This way Your IDE will be of actual help.
 
@@ -44,20 +43,124 @@ To address all items in a list, Pythonic slice expression
     ``$.some_array[*]``, is (sort of) supported, only as ``JP.some_array["*"]``.
 
 
+Obtaining a single value
+------------------------
+
+If You need only a first value, use ``find_next()``, roughly equivalent to ``next(find_all(...))``:
+
+>>> find_next([{"hello": 5}, {"hello": 42}], JP[:].hello)
+5
+>>> find_next([{"hello": 5}, {"hello": 42}], JP[1].hello)
+42
+
+You can also supply a default value for ``find_next()``, just like for ``next()``:
+
+>>> find_next([{"hello": 5}, {"hello": 42}], JP[3].hello, default=17)
+17
+
+Supplying a ``None`` as a default value to ``find_next()``, like:
+
+>>> empty_content = []
+>>> type( find_next(empty_content, JP[3].hello[:].hi[:3], default=None) )
+<class 'NoneType'>
+
+is as close to a `safe navigation operator` implementation as You can get
+given that `PEP 505`_ has deferred status.
+
+
+Paths to iterated items
+-----------------------
+
+You may be interested in the path of an item being yielded.
+
+    When You use ``enumerate()`` with a ``list``, You want to obtain the
+    index of an item alongside with the item's value during iteration. For
+    instance,
+
+    >>> list(enumerate(["a", "b"]))
+    [(0, 'a'), (1, 'b')]
+
+    You can use that index to refer to the item, e.g. in a log message
+    or for retrieving the item at a later point.
+
+Similarly, when iterating within a hierarchical data structure, You
+may want to obtain the path object along the item's value:
+
+>>> path, item = find_next(
+...     content,
+...     JP.employees[1],
+...     with_path=True
+... )
+>>> item
+{'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
+
+The path to the item found is:
+
+>>> str(path)
+'$.employees[1]'
+
+You can use this ``path`` object in a log message or for retrieval:
+
+>>> path = JP.employees[1].name
+>>> find_next(content, path)
+'Doe, Jane'
+
+You may want to use ``.parent`` to have access to the containing structure:
+
+>>> find_next(content, path.parent)
+{'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
+
+Naturally, ``find_all()`` also supports ``with_path``:
+
+>>> for path, _ in find_all(content, JP.employees[1:], with_path=True):
+...     print(path)
+$.employees[1]
+$.employees[2]
+
+
+Suppressing indexing and key errors
+-----------------------------------
+
+By default, path expressions are strict, e.g. for non-existent ``list`` indexes
+``find_all()`` raises an ``IndexError``, and for non-existend ``dict`` keys a ``KeyError``:
+
+>>> list(find_all([0, 1], JP[2]))
+Traceback (most recent call last):
+    ...
+IndexError: list index out of range
+>>> list(find_all({"hello": 42}, JP.hi))
+Traceback (most recent call last):
+    ...
+KeyError: 'hi'
+
+This is consistent with how a ``list`` and ``dict`` behave.
+
+You can suppress these errors:
+
+>>> list(find_all([0, 1], JP[2], lenient=True))
+[]
+>>> list(find_all({"hello": 42}, JP.hi, lenient=True))
+[]
+
+    When invoking ``find_next()``, just pass a default value.
+
+
 Selecting list items by boolean expressions
 -------------------------------------------
 
-Dictionaries in lists can also be selected by simple boolean expressions evaluated within
-the context of each such dictionary, for instance
+Dictionary items in lists can be selected by boolean expressions evaluated within
+the context of each ``dict`` item, for instance
 
 >>> list(find_all(content, JP.employees[JP.age > 35]))
 [{'name': 'Deer, Jude', 'age': 42, 'account': 'judedeer'}]
 
-Only simple comparisons are supported, and only these operators: ``==``, ``!=``,
+Only simple comparisons are supported with these operators: ``==``, ``!=``,
 ``<``, ``<=``, ``>``, ``>=``.
 
-    Both operands can be dict keys in a list item, e.g. expressions like
-    ``JP.years[JP.planned_budget < JP.realized_budget]`` are supported.
+    The first operand must always be a key expression, never a constant,
+    e.g. a ``JP.employees[35 < JP.age]`` will `not` work.
+    However, both operands can be key expressions, e.g.
+    ``JP.years[JP.planned_budget < JP.realized_budget]`` is supported.
 
 In addition to this, existence of a sub-item or path can also be used as
 a list item selector, e.g. ``JP.years[JP.planned_budget]`` would select only
@@ -71,80 +174,19 @@ Consider the following ``dict`` content
 
 >>> content = {
 ...     "apple": [{"name": "red delicious"}, {"name": "punakaneli"}],
-...     "pear": [{"name": "wilhelm"}, {"name": "conference"}]
+...     "pineapple": [{"name": "ripley"}, {"name": "mordilona"}],
+...     "banana": [{"name": "cavendish"}, {"name": "lantundan"}]
 ... }
 
-if You want to iterate over `all` fruit items, both apples and pears,
-You can do so:
+if You want to iterate both apples and pineapples, You can do so:
 
->>> list(find_all(content, JP["apple|pear"][:].name))
-['red delicious', 'punakaneli', 'wilhelm', 'conference']
+>>> list(find_all(content, JP[".*apple"][:].name))
+['red delicious', 'punakaneli', 'ripley', 'mordilona']
 
-or even
+and, if You are interested in everything including bananas:
 
 >>> list(find_all(content, JP[".*"][:].name))
-['red delicious', 'punakaneli', 'wilhelm', 'conference']
-
-if You are interested in everything, not only apples and pears.
-
-
-Paths to items iterated
------------------------
-
-You may be interested in the actual path of an item being returned.
-
-    When You use ``enumerate()`` with a ``list``, You want to obtain the
-    index of an item alongside with the item's value during iteration. For
-    instance,
-
-    >>> list(enumerate(["a", "b"]))
-    [(0, 'a'), (1, 'b')]
-
-    and You can use that index to refer to the item itself, even to retrieve
-    it again from the list.
-
-Similarly, when iterating within a hierarchical data structure, You
-may want to obtain a `pointer` (i.e. path object) alongside the item's
-value:
-
->>> content = {"employees": [
-...     {"name": "Doe, John", "age": 32, "account": "johndoe"},
-...     {"name": "Doe, Jane", "age": -23, "account": "janedoe"},
-...     {"name": "Deer, Jude", "age": 42, "account": "judedeer"},
-... ]}
->>> path, item = next(tup for tup in find_all(
-...     content,
-...     JP.employees[JP.age < 0],
-...     with_path=True
-... ))
->>> item
-{'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
-
-The path to the item found is:
-
->>> str(path)
-'$.employees[1]'
-
-The path object yielded along is a JSON Path-like object, just as if You
-constructed it as ``JP.employee[1]``.
-
-    With argument ``with_path=True`` passed, ``find_all()`` yields tuples
-    instead of items only. The first item of a yielded tuple is the path object,
-    and the second item is the item itself. This is consistent with ``enumerate()``
-    behavior.
-
-Also, the JSON Path-like objects have a field called ``.parent``, so that You can
-access the parent data structure, consider a path object you've obtained. You
-can dig out its respective value:
-
->>> path = JP.employees[1].name
->>> next(find_all(content, path))
-'Doe, Jane'
-
-But if you want to have access to the containing structure, use ``.parent``:
-
->>> next(find_all(content, path.parent))
-{'name': 'Doe, Jane', 'age': -23, 'account': 'janedoe'}
+['red delicious', 'punakaneli', 'ripley', 'mordilona', 'cavendish', 'lantundan']
 
 
 .. _subitems:
@@ -152,21 +194,18 @@ But if you want to have access to the containing structure, use ``.parent``:
 Selecting sub-items
 -------------------
 
-You can select sub-items of iterated items, comes handy into turning one structure
-into another, like a list of records into a ``dict``:
+You can select multiple sub-items of iterated items, they are yielded as ``tuple`` instances:
 
->>> {account: name for account, name in find_all(content, JP.employees[:](JP.account, JP.name))}
-{'johndoe': 'Doe, John', 'janedoe': 'Doe, Jane', 'judedeer': 'Deer, Jude'}
+>>> content = {"employees": [
+...     {"name": "Doe, John", "age": 32, "account": "johndoe"},
+...     {"name": "Doe, Jane", "age": -23, "account": "janedoe"},
+...     {"name": "Deer, Jude", "age": 42, "account": "judedeer"},
+... ]}
+>>> list(find_all(content, JP.employees[:](JP.account, JP.name)))
+[('johndoe', 'Doe, John'), ('janedoe', 'Doe, Jane'), ('judedeer', 'Deer, Jude')]
 
-    This is roughly equivalent to:
-
-    >>> {item["account"]: item["name"] for item in find_all(content, JP.employees[:])}
-    {'johndoe': 'Doe, John', 'janedoe': 'Doe, Jane', 'judedeer': 'Deer, Jude'}
-
-    The sub-item selection, while slightly more verbose, is arguably more
-    declarative.
-
-You can also make a sub-items selection produce dictionaries by explicitly naming sub-paths:
+You can also make a sub-items selection produce dictionaries by explicitly
+defining ``dict`` keys:
 
 >>> list(find_all(content, JP.employees[:](id=JP.account, username=JP.name)))
 [{'id': 'johndoe', 'username': 'Doe, John'}, {'id': 'janedoe', 'username': 'Doe, Jane'}, {'id': 'judedeer', 'username': 'Deer, Jude'}]
@@ -178,14 +217,15 @@ and ``"name"`` as ``username``.
 Variable field name selection
 -----------------------------
 
-The forms ``JP["field_name"]`` and ``JP.field_name`` are equivalent:
+The forms ``JP.field_name`` and ``JP["field_name"]`` are equivalent. Thus, if you don't know
+``field_name`` in advance, you can still construct a path object:
 
 >>> from functools import reduce
->>> def my_sum(content, field_name_to_sum, initial):
+>>> def my_sum(content, field_name, initial_value):
 ...     return reduce(
 ...         lambda x, y: x + y,
-...         find_all(content, JP.employees[:][field_name_to_sum]),
-...         initial
+...         find_all(content, JP.employees[:][field_name]),
+...         initial_value
 ...     )
 >>> my_sum(content, "age", 0)
 51
@@ -207,8 +247,7 @@ The forms ``JP["field_name"]`` and ``JP.field_name`` are equivalent:
 Utility ``with_values()``
 -------------------------
 
-You can produce a copy of Your hierarchical data with some values overwritten (or
-even added):
+You can produce a copy of Your hierarchical with some changes in data:
 
 >>> content = [{"msg": "hallo"}, {"msg": "hello"}, {"msg": "bye"}]
 >>> with_values(content, JP[1].msg, "moi")
@@ -221,22 +260,22 @@ even added):
 
 You can also overwrite values at multiple places:
 
->>> with_values(content, JP[:].msg, "moi")
-[{'msg': 'moi'}, {'msg': 'moi'}, {'msg': 'moi'}]
+>>> with_values(content, JP[1:].msg, "moi")
+[{'msg': 'hallo'}, {'msg': 'moi'}, {'msg': 'moi'}]
 
-or even insert new key / value pairs into ``dict`` s:
+or even insert entirely new keys into ``dict`` items:
 
 >>> with_values(content, JP[:].id, -1)
 [{'msg': 'hallo', 'id': -1}, {'msg': 'hello', 'id': -1}, {'msg': 'bye', 'id': -1}]
 
-Writing or added the same value in multiple places is perhaps not that
-useful. However, You _can_ use an iterator to supply the values to use for
-overwriting or adding:
+Adding the exact same ID value (-1) is perhaps not that useful. However, You `can` use
+an iterator to supply the values:
 
 >>> with_values(content, JP[:].id, iter(range(100)))
 [{'msg': 'hallo', 'id': 0}, {'msg': 'hello', 'id': 1}, {'msg': 'bye', 'id': 2}]
 
-    or, more elegantly, if range ``stop=100`` irks You, using ``itertools.count()``:
+    or, more elegantly, if range's ``stop=100`` irks You, as it should, You may
+    use ``itertools.count()``:
 
     >>> from itertools import count
     >>> with_values(content, JP[:].id, count(0, 1))
@@ -249,71 +288,47 @@ calculating the new value to be inserted:
 [{'msg': 'HALLO'}, {'msg': 'HELLO'}, {'msg': 'BYE'}]
 
 In the example above, the value for dictionary key `"msg"` is given
-as argument to the function, and this form is good for re-calculating
-an existing value. If You want to add a new key/value pair to a dictionary,
-You can achieve that in one of two ways:
+as argument to the function, and this form is good for calculating
+a new value for the same key. But what if you want to calculate a new
+key/value pair, e.g. you want to calculate the base-64 encoded form
+of each message?
 
-- Iterate over dictionaries of the list, receiving each dictionary as argument to Your
-  function, and re-calculate entire dictionaries:
-
+>>> import base64
 >>> with_values(
 ...     content,
-...     JP[:],
-...     lambda d: d | {"msg_startswith_h": d["msg"].startswith("h")}
+...     JP[:](JP.b64,),
+...     lambda d: (str(base64.b64encode(bytes(d["msg"], "utf-8")), "utf-8"),)
 ... )
-[{'msg': 'hallo', 'msg_startswith_h': True}, {'msg': 'hello', 'msg_startswith_h': True}, {'msg': 'bye', 'msg_startswith_h': False}]
+[{'msg': 'hallo', 'b64': 'aGFsbG8='}, {'msg': 'hello', 'b64': 'aGVsbG8='}, {'msg': 'bye', 'b64': 'Ynll'}]
 
-- Iterate over dictionaries of the list, receiving each dictionary as argument to
-  Your function just as above, but use the
-  `sub-item expression`, to compose dictionary content
-  for You, e.g. adding even two keys ( ``"id"`` and ``"verdict"`` ) now, to each
-  dictionary item:
+Above, you are iterating over each ``dict`` item, and telling, with a
+`sub-item expression` (the tuple with the  single ``JP.hash``), the name
+of the key(s) to be inserted: ``hash``. Then the function,
+taking an entire ``dict`` item as an argument, returns a tuple with a value for each
+key to be inserted. You can insert multiple keys, too:
 
 >>> counter = count(0, 1)
 >>> with_values(
 ...     content,
-...     JP[:](JP.id, JP.msg_startswith_h),
-...     lambda d: (next(counter), d["msg"].startswith("h"))
+...     JP[:](JP.id, JP.b64),
+...     lambda d: (next(counter), str(base64.b64encode(bytes(d["msg"], "utf-8")), "utf-8"))
 ... )
-[{'msg': 'hallo', 'id': 0, 'msg_startswith_h': True}, {'msg': 'hello', 'id': 1, 'msg_startswith_h': True}, {'msg': 'bye', 'id': 2, 'msg_startswith_h': False}]
+[{'msg': 'hallo', 'id': 0, 'b64': 'aGFsbG8='}, {'msg': 'hello', 'id': 1, 'b64': 'aGVsbG8='}, {'msg': 'bye', 'id': 2, 'b64': 'Ynll'}]
 
-    Above, You declare what keys You are interested in overwriting or adding
-    (``"id"`` and ``"msg_startswith_h"``), and Your function returns a tuple of
-    just those values, based on the parent dictionary given as argument to it.
+You don't have to use sub-item expressions, you may construct the dictionary
+on your own, too:
 
+>>> counter = count(0, 1)
+>>> with_values(
+...     content,
+...     JP[:],
+...     lambda d: d | { "id": next(counter), "b64": str(base64.b64encode(bytes(d["msg"], "utf-8")), "utf-8")}
+... )
+[{'msg': 'hallo', 'id': 0, 'b64': 'aGFsbG8='}, {'msg': 'hello', 'id': 1, 'b64': 'aGVsbG8='}, {'msg': 'bye', 'id': 2, 'b64': 'Ynll'}]
 
     The function ``with_values()`` has a similar idea to `JSON Patch`_, except there
     is no point of a full-fledged patching facility, after all, Python list
     and dictionary comprehensions go a long way in manipulating content hierarchy.
-
-
-Utility ``find_next()``
------------------------
-
-Often, You just need a first value, roughly equivalent to a ``next(find_all(...))``
-invocation. You can use ``find_next()`` for this, for instance
-
->>> find_next([{"hello": 5}, {"hello": 42}], JP[:].hello)
-5
->>> find_next([{"hello": 5}, {"hello": 42}], JP[1].hello)
-42
-
-You can also ask for the path of the value returned, in the style of ``with_path=True``
-above
-
->>> path, value = find_next([{"hello": 5}, {"hello": 42}], JP[-1].hello, with_path=True)
->>> str(path)
-'$[1].hello'
->>> value
-42
-
-You can also supply a default value for ``find_next()``, just like for ``next()``:
-
->>> find_next([{"hello": 5}, {"hello": 42}], JP[3].hello, default=17)
-17
-
->>> find_next([{"hello": 5}, {"hello": 42}], JP[3].hello, default=17)
-17
 
 
 Utilities ``find_all_unique()``, ``find_all_duplicate()``
@@ -325,7 +340,7 @@ A common task is to find only unique items in data, e.g.
 >>> list(find_all_unique(content, JP[:].hi))
 [1, 2, 3, -22]
 
-and of course You can ask for the paths, too
+and You can ask for the paths, too
 
 >>> content = [{"hi": 1}, {"hi": 2}, {"hi": 1}, {"hi": 3}, {"hi": -22}, {"hi": 3}]
 >>> [(str(path), item) for path, item in find_all_unique(content, JP[:].hi, with_path=True)]
@@ -341,46 +356,36 @@ A related common task is to find duplicates, e.g.
 ['Duplicate ID: 123 at $.pear[1]']
 
 
-Suppressing indexing and key errors, safe navigation operator
--------------------------------------------------------------
+``parse()``
+-----------
 
-By default, path expressions are strict, e.g. for non-existent ``list`` indexes
-You get an ``IndexError``:
+You may want to be able parse back the stringified value of a path object, e.g. using content
 
->>> list(find_all([0, 1], JP[2]))
-Traceback (most recent call last):
-    ...
-IndexError: list index out of range
+>>> content = {
+...     "apple": [{"name": "red delicious", "id": 123}, {"name": "punakaneli", "id": 234}],
+...     "pear": [{"name": "wilhelm", "id": 345}, {"name": "conference", "id": 123}]
+... }
 
-which is consistent with how a ``list`` behaves. Similarly, for
-non-existent ``dict`` keys You get a ``KeyError``:
+and You have some the stringified path, e.g. in persistence,
 
->>> list(find_all({"hello": 42}, JP.hi))
-Traceback (most recent call last):
-    ...
-KeyError: 'hi'
+>>> path_str = str(JP.apple[0].name)
+>>> path_str
+'$.apple[0].name'
 
-You can suppress these errors and simply have nothing yielded, for ``list`` indexes:
+which now you wish to turn into a path object and use it
 
->>> list(find_all([0, 1], JP[2], lenient=True))
-[]
+>>> path = parse(path_str)
+>>> assert path == JP.apple[0].name
+>>> find_next(content, path)
+'red delicious'
 
-and for ``dict`` keys:
+Since there is a an overlap between `JSON Path`_ and this libary's features,
+``parse()`` provides a measure of `JSON Path`_ support:
 
->>> list(find_all({"hello": 42}, JP.hi, lenient=True))
-[]
+>>> list(find_all(content, parse('$.apple[*].name')))
+['red delicious', 'punakaneli']
 
-In fact, ``find_next()`` which, in turn, invokes ``find_all()``,
-delegates its call to ``find_all()`` with ``lenient=True`` whenever a default
-value is defined for ``find_next()`` itself. Thus, supplying a ``None`` as a default
-value to ``find_next()``:
-
->>> empty_content = []
->>> type( find_next(empty_content, JP[3].hello[:].hi[:3], default=None) )
-<class 'NoneType'>
-
-is as close to a `safe navigation operator` implementation as You can get
-given that `PEP 505`_ has deferred status.
+but only for simpler `JSON Path`_ expressions.
 
 
 Use Case: JSON content validator and tests
@@ -405,17 +410,16 @@ with the type of a fruit (apple, pear) encoded in the hierarchy itself.
     ['red delicious', 'punakaneli']
 
 Let's say Your business analyst says the name of fruit is unique on document scope,
-i.e. no two fruits can have the same name regardless whether they are of the same
-type or not, and You must validate this unique constraint for all requests.
+i.e. no two fruits can have the same name regardless of their types,
+and this unique constraint is to be validated.
 
-You wish the JSON format would be flat, something like
+Now You wish the JSON format would be flat, something like
 ``[{"name": "red delicious", "type": "apple"}, ...]``, encoding the type in
-a key, because then You could use JSON Schema facility
-`uniqueKeys <https://docs.json-everything.net/schema/vocabs/uniquekeys/#schema-uniquekeys-keyword>`__,
-but You are not in control of the JSON format: You need a custom validator.
-With this library, it's easy enough to fashion something like below:
+a key, because then You could use
+`uniqueKeys <https://docs.json-everything.net/schema/vocabs/uniquekeys/#schema-uniquekeys-keyword>`__
+for validation, but You are not in control of the JSON format, You need a custom validator:
 
->>> def verify_unique_fruit_names(content: dict) -> None | str:
+>>> def find_fruit_name_duplicate(content: dict) -> None | str:
 ...    """
 ...    Return the (path, name) tuple of the first fruit name
 ...    duplicate within the entire document if any, None otherwise.
@@ -428,7 +432,7 @@ With this library, it's easy enough to fashion something like below:
 First off, You want to test that Your implementation will regard the valid document
 ``fruits`` valid:
 
->>> assert verify_unique_fruit_names(fruits) is None
+>>> assert find_fruit_name_duplicate(fruits) is None
 
 Then, You want to verify that the some document with name duplicates will not
 pass verification, with the expected error info tuple returned. At this point
@@ -436,11 +440,11 @@ test suites normally choose between two alternatives, the bad and the ugly:
 
 - The bad: the input document is small and simple. The test is easy to read
   and maintain as It's easy to spot where the input is broken, but one is left
-  with the nagging feeling, whether will ``verify_unique_fruit_names()`` work
+  with the nagging feeling, whether will ``find_fruit_name_duplicate()`` work
   for more complex inputs, too?
 
 - The ugly: the input document is big and complex. Now You know for sure
-  that ``verify_unique_fruit_names()`` works for bigger input, except now the
+  that ``find_fruit_name_duplicate()`` works for bigger input, except now the
   test is not readable / maintainable, as it's not clear at all, at first glance,
   where the input is broken. You now have a so called `MD5 test`: no one knows
   why it breaks when it does.
@@ -468,7 +472,7 @@ just to satisfy our curiosity, what the broken input looks like:
 
 After this, the expectations in our tests will be self-explanatory:
 
->>> error_path, error_value = verify_unique_fruit_names(fruits_with_duplicate_names)
+>>> error_path, error_value = find_fruit_name_duplicate(fruits_with_duplicate_names)
 >>> assert error_path == broken_path
 >>> assert error_value == an_apple_name
 

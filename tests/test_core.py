@@ -1,12 +1,66 @@
+from itertools import product
+
 import pytest
 
 from aweson import JP, find_all, find_next
-from aweson.core import _Predicate
+from aweson.core import _Accessor, _Predicate, parse, _BinaryPredicate
+
 
 ###############################################################
 #
 # infra
 #
+
+
+def test_root_accessors_are_equivalent():
+    a_root = _Accessor(parent=None, container_type=type(None))
+    assert JP == a_root
+    assert a_root == _Accessor(parent=None, container_type=type(None))
+
+
+@pytest.mark.parametrize("path1, path2", [
+    (JP, JP),
+    (JP.hello, JP.hello),
+    (JP.hello[2], JP.hello[2]),
+    (JP.hello[2:4], JP.hello[2:4]),
+    (JP.hello["hi"], JP.hello["hi"]),
+    (JP.hello[JP.hi == "hi"], JP.hello[JP.hi == "hi"]),
+    (JP.hello(JP.hi, JP.hola[0]), JP.hello(JP.hi, JP.hola[0])),
+    (JP.hello(world=JP.mundo, hi=JP.hola[0]), JP.hello(world=JP.mundo, hi=JP.hola[0]))
+])
+def test_equivalent_paths(path1, path2):
+    # tests equivalent to different, but equivalent path object
+    assert isinstance(path1 == path2, _BinaryPredicate)
+    assert path1 == path2  # truthy
+
+    # tests equivalent to self
+    assert path1 == path1
+
+
+@pytest.mark.parametrize(
+    "path1, path2",
+    [
+        (JP, JP.hello),
+        (JP, JP[0]),
+        (JP.hello, JP[0]),
+        (JP.hello, JP.hi),
+        (JP[0], JP[1]),
+    ],
+)
+def test_different_paths_are_not_equivalent(path1, path2):
+    assert path1 != path2
+
+
+@pytest.mark.parametrize(
+    "path1, path2",
+    [
+        (JP["hi"], JP.hi),
+        (JP[0]["hi"], JP[0].hi),
+        (JP["hi"][1], JP.hi[1]),
+    ],
+)
+def test_field_access_is_equivalent_to_idx_by_string(path1, path2):
+    assert path1 == path2
 
 
 @pytest.mark.parametrize(
@@ -48,50 +102,114 @@ def test_overloaded_bool_operators(jp_bool):
     assert isinstance(jp_bool, _Predicate)
 
 
+###############################################################
+#
+# str()
+#
+
+
+PATH_OBJECTS_AND_STRINGIFIED = [
+    (JP, "$"),
+    (JP.hello, "$.hello"),
+    (JP.hello.world, "$.hello.world"),
+    (JP["hello"], "$.hello"),
+    (JP["hello"]["world"], "$.hello.world"),
+    (JP[0], "$[0]"),
+    (JP[42], "$[42]"),
+    (JP[-1], "$[-1]"),
+    (JP[1:2], "$[1:2]"),
+    (JP[-2:-1], "$[-2:-1]"),
+    (JP[1:], "$[1:]"),
+    (JP[:2], "$[:2]"),
+    (JP[:-1], "$[:-1]"),
+    (JP[12:], "$[12:]"),
+    (JP[-2:], "$[-2:]"),
+    (JP[5][42], "$[5][42]"),
+    (JP[:], "$[:]"),
+    (JP["*"], "$[:]"),
+    # (JP[:], "$[*]"),
+    (JP[::], "$[:]"),
+    (JP[1:], "$[1:]"),
+    (JP[1::], "$[1:]"),
+    (JP[:2], "$[:2]"),
+    (JP[:2:], "$[:2]"),
+    (JP[::-1], "$[::-1]"),
+    (JP[1:12:-1], "$[1:12:-1]"),
+    (JP[::-1], "$[::-1]"),
+    (JP[1:12:-1], "$[1:12:-1]"),
+    (JP[5].hello, "$[5].hello"),
+    (JP.hello[5], "$.hello[5]"),
+    (JP[5].hello[42].world, "$[5].hello[42].world"),
+    (JP.hello[5].world[42], "$.hello[5].world[42]"),
+    (JP["hello"][5]["world"][42], "$.hello[5].world[42]"),
+    (JP[JP == 0], "$[?@ == 0]"),
+    (JP[JP.id == 0], "$[?@.id == 0]"),
+    (JP[JP.id == None], "$[?@.id == null]"),
+    (JP[JP != 0], "$[?@ != 0]"),
+    (JP[JP > 0], "$[?@ > 0]"),
+    (JP[JP >= 0], "$[?@ >= 0]"),
+    (JP[JP < 0], "$[?@ < 0]"),
+    (JP[JP <= 0], "$[?@ <= 0]"),
+    (JP[JP.id], "$[?@.id]"),
+    (JP[JP.id == 0], "$[?@.id == 0]"),
+    (JP.products[JP == 0], "$.products[?@ == 0]"),
+    (JP.products[JP.id], "$.products[?@.id]"),
+    (JP.products[JP.price > 120], "$.products[?@.price > 120]"),
+    (JP.products[JP.price > 120.1], "$.products[?@.price > 120.1]"),
+    (JP.products[JP.invalid == False], "$.products[?@.invalid == false]"),
+    (JP.products[JP.name == "acme"], "$.products[?@.name == \"acme\"]"),
+    (JP.products[JP.name == None], "$.products[?@.name == null]"),
+    (JP[JP.data == [0, 1]].id, "$[?@.data == [0, 1]].id"),
+    (JP[JP.data == {"first": 10, "second": 11}].id, '$[?@.data == {"first": 10, "second": 11}].id'),
+    (JP.products[JP.price > JP.avg_price], "$.products[?@.price > ?@.avg_price]"),
+    (JP["hello|hi"].id, "$[hello|hi].id"),
+    (JP[5].hello[42].world, "$[5].hello[42].world"),
+    (JP.hello[5].world[42], "$.hello[5].world[42]"),
+    (JP["hello"][5]["world"][42], "$.hello[5].world[42]"),
+    (JP["hello|hi"].id, "$[hello|hi].id"),
+    (JP["a.*b"].id, "$[a.*b].id"),
+    (JP.hello(JP.world, JP.hi[0]), "$.hello(@.world, @.hi[0])"),
+    (
+        JP.hello(world=JP.mundo, hi=JP.hola[0]),
+        "$.hello(world=@.mundo, hi=@.hola[0])",
+    ),
+]
+
+
+@pytest.mark.parametrize("jp,stringified", PATH_OBJECTS_AND_STRINGIFIED)
+def test_jp_stringification(jp, stringified):
+    assert str(jp) == stringified
+
+
+###############################################################
+#
+# parse()
+#
+
+
 @pytest.mark.parametrize(
-    "jp,stringfied",
-    [
-        (JP, "$"),
-        (JP.hello, "$.hello"),
-        (JP.hello.world, "$.hello.world"),
-        (JP["hello"], "$.hello"),
-        (JP["hello"]["world"], "$.hello.world"),
-        (JP[0], "$[0]"),
-        (JP[42], "$[42]"),
-        (JP[-1], "$[-1]"),
-        (JP[5][42], "$[5][42]"),
-        (JP[:], "$[:]"),
-        (JP["*"], "$[:]"),
-        (JP[JP == 0], "$[?@ == 0]"),
-        (JP[JP != 0], "$[?@ != 0]"),
-        (JP[JP > 0], "$[?@ > 0]"),
-        (JP[JP >= 0], "$[?@ >= 0]"),
-        (JP[JP < 0], "$[?@ < 0]"),
-        (JP[JP <= 0], "$[?@ <= 0]"),
-        (JP[JP.id], "$[?@.id]"),
-        (JP[JP.id == 0], "$[?@.id == 0]"),
-        (JP.products[JP == 0], "$.products[?@ == 0]"),
-        (JP.products[JP.id], "$.products[?@.id]"),
-        (JP.products[JP.price > 120], "$.products[?@.price > 120]"),
-        (JP.products[JP.price > JP.avg_price], "$.products[?@.price > @.avg_price]"),
-        (JP[::], "$[:]"),
-        (JP[1:], "$[1:]"),
-        (JP[1::], "$[1:]"),
-        (JP[:2], "$[:2]"),
-        (JP[:2:], "$[:2]"),
-        (JP[::-1], "$[::-1]"),
-        (JP[1:12:-1], "$[1:12:-1]"),
-        (JP[5].hello, "$[5].hello"),
-        (JP.hello[5], "$.hello[5]"),
-        (JP["hello|hi"].id, "$[hello|hi].id"),
-        (JP[5].hello[42].world, "$[5].hello[42].world"),
-        (JP.hello[5].world[42], "$.hello[5].world[42]"),
-        (JP["hello"][5]["world"][42], "$.hello[5].world[42]"),
-        (JP.hello(JP.world, JP.hi[0]), "$.hello(@.world, @.hi[0])"),
-    ],
+    "jp, path",
+    PATH_OBJECTS_AND_STRINGIFIED + [
+        (JP[:], "$[*]")
+    ]
 )
-def test_jp_stringification(jp, stringfied):
-    assert str(jp) == stringfied
+def test_parse(jp, path):
+    parsed_jp = parse(path)
+    assert parsed_jp == jp
+
+
+@pytest.mark.parametrize("path",[
+    "$[?@.is == (1, 2)]"
+])
+def test_parse_rejects(path):
+    with pytest.raises(ValueError, match="not a JSON value"):
+        _ = parse(path)
+
+
+###############################################################
+#
+# is singular
+#
 
 
 @pytest.mark.parametrize(
@@ -111,6 +229,12 @@ def test_jp_stringification(jp, stringfied):
 )
 def test_path_is_singular(jp, is_singular):
     assert jp.is_singular() == is_singular
+
+
+###############################################################
+#
+# sub-selection
+#
 
 
 def test_sub_selection_either_all_unnamed_or_all_named_fields():
@@ -510,6 +634,81 @@ def test_lenient_find_all_yields_nothing_mixed_case(content, jp):
             True,
             [(JP.product[1].name, "acme")],
         ),
+        (
+                {
+                    "product": [
+                        {"current_price": 12.3, "invalid": False, "name": "kerfufle"},
+                        {"current_price": 1.3, "invalid": True, "name": "acme"},
+                    ]
+                },
+                JP.product[JP.invalid == True].name,
+                True,
+                [(JP.product[1].name, "acme")],
+        ),
+        (
+                {
+                    "product": [
+                        {"current_price": 12.3, "invalid": False, "name": "kerfufle"},
+                        {"current_price": 1.3, "invalid": True, "name": "acme"},
+                    ]
+                },
+                JP.product[JP.name == "kerfufle"].invalid,
+                True,
+                [(JP.product[0].invalid, False)],
+        ),
+        (
+                {
+                    "product": [
+                        {"current_price": 12.3, "invalid": False, "name": None},
+                        {"current_price": 1.3, "invalid": True, "name": "acme"},
+                    ]
+                },
+                JP.product[JP.name == None].invalid,
+                True,
+                [(JP.product[0].invalid, False)],
+        ),
+        # cases: comparing list sub-item
+        (
+            [
+                {"id": "a", "data": [0, 1]},
+                {"id": "b", "data": [10, 11]},
+                {"id": "c", "data": [20, 21]},
+            ],
+            JP[JP.data == [10, 11]].id,
+            False,
+            ["b"]
+        ),
+        (
+            [
+                {"id": "a", "data": [0, 1]},
+                {"id": "b", "data": [10, 11]},
+                {"id": "c", "data": [20, 21]},
+            ],
+            JP[JP.data == [10, 11]].id,
+            True,
+            [(JP[1].id, "b")]
+        ),
+        # cases: comparing dict sub-item
+        (
+[
+                {"id": "a", "data": {"first": 0, "second": 1}},
+                {"id": "b", "data": {"first": 10, "second": 11}},
+                {"id": "c", "data": {"first": 20, "second": 21}},
+            ],
+            JP[JP.data == {"first": 10, "second": 11}].id,
+            False,
+            ["b"]
+        ),
+        (
+            [
+                {"id": "a", "data": {"first": 0, "second": 1}},
+                {"id": "b", "data": {"first": 10, "second": 11}},
+                {"id": "c", "data": {"first": 20, "second": 21}},
+            ],
+            JP[JP.data == {"first": 10, "second": 11}].id,
+            True,
+            [(JP[1].id, "b")]
+        ),
         # cases: comparing two sub-items
         (
             {
@@ -624,43 +823,94 @@ def test_find_next(content, jp, with_path, expected_value):
 
 
 @pytest.mark.parametrize(
-    "content,jp,with_path,default",
+    "content,jp,expected_error",
     [
-        # cases: slice with empty list
-        ([], JP[:].hello, False, 17),
-        ([], JP[:].hello, True, (None, 17)),
-        # cases: ignoring index error
+        # case: simple, index error
+        (
+            [5, 42],
+            JP[2],
+            IndexError
+        ),
+        # case: simple, slice with empty list
+        ([], JP[:], StopIteration),
+        # case: simple, key error
+        (
+            {"hello": 5},
+            JP.hi,
+            KeyError
+        ),
+        # cases: mixed, longer paths
+        ([], JP[:].hello, StopIteration),
         (
             [{"hello": 5}, {"hello": 42}],
             JP[2].hello,
-            False,
-            5,
-        ),
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[2].hello,
-            True,
-            (None, 5),
-        ),
-        # cases: ignoring key error
-        (
-            [{"hello": 5}, {"hello": 42}],
-            JP[2].hi,
-            False,
-            5,
+            IndexError
         ),
         (
             [{"hello": 5}, {"hello": 42}],
             JP[2].hi,
-            True,
-            (None, 5),
+            IndexError
         ),
-        # cases: mixed, long paths
-        ([], JP[:].hello[13].hi, False, 5),
-        ([], JP[:].hello[13].hi, True, (None, 5)),
-        ({}, JP.hello[13].hi[:], False, 5),
-        ([], JP[:].hello[13].hi, True, (None, 5)),
+        ([], JP[1:].hello[:2].hi, StopIteration),
+        ([], JP[:].hello[13].hi, StopIteration),
+        ({}, JP.hello[1:].hi[:2], KeyError),
+        ({}, JP.hello[13].hi[:], KeyError),
     ],
 )
-def test_find_next_with_default(content, jp, with_path, default):
-    assert find_next(content, jp, with_path=with_path, default=default)
+def test_find_next_nonexistent_without_default(content, jp, expected_error):
+    for with_path in (True, False):
+        with pytest.raises(expected_error):
+            _ = find_next(content, jp, with_path=with_path)
+
+
+@pytest.mark.parametrize(
+    "content,jp",
+    [
+        # case: simple, ignoring index error
+        (
+            [5, 42],
+            JP[2],
+        ),
+        # case: simple, slice with empty list, ignoring stop iteration error
+        ([], JP[:]),
+        # case: simple, ignoring key error
+        (
+            {"hello": 5},
+            JP.hi,
+        ),
+        # cases: mixed, longer paths, ignoring errors
+        ([], JP[:].hello),
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[2].hello,
+        ),
+        (
+            [{"hello": 5}, {"hello": 42}],
+            JP[2].hi,
+        ),
+        ([], JP[1:].hello[:2].hi),
+        ([], JP[:].hello[13].hi),
+        ({}, JP.hello[1:].hi[:2]),
+        ({}, JP.hello[13].hi[:]),
+    ],
+)
+def test_find_next_nonexistent_with_default(content, jp):
+    defaults = (
+        None,
+        17,
+        'a string',
+        ('an ad-hoc object',)
+    )
+    with_paths = (True, False)
+
+    for defaults, with_path in product(defaults, with_paths):
+        results = find_next(content, jp, with_path=with_path, default=defaults)
+        if with_path:
+            assert isinstance(results, tuple)
+            path, found = results
+            assert path is None
+            assert found == defaults
+        else:
+            found = results
+            assert isinstance(found, type(defaults))
+            assert found == defaults
