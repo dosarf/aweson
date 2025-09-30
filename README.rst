@@ -356,8 +356,8 @@ A related common task is to find duplicates, e.g.
 ['Duplicate ID: 123 at $.pear[1]']
 
 
-``parse()``
------------
+Utility ``parse()``
+-------------------
 
 You may want to be able parse back the stringified value of a path object, e.g. using content
 
