@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 3.1.0 (2025-09-30)
+
+- Support parse()
+- Minor bugfixes
+
 ## 3.0.0 (2025-07-26)
 
 - Support content manipulation (with_values())
